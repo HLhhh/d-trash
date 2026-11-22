@@ -2,6 +2,8 @@
 
 [简体中文](./README_zh.md) · [Technical details](./docs/DETAIL.md) · [Changelog](./CHANGELOG.md)
 
+GitHub primary repository · [Gitee mirror](https://gitee.com/huang-lin-java/d-trash)
+
 A session recycle bin for DeepSeek Harness (DSH), with restore and permanent local session log deletion.
 
 ## Why

@@ -2,6 +2,8 @@
 
 [English](./README.md) · [技术细节](./docs/DETAIL.md) · [变更记录](./CHANGELOG.md)
 
+GitHub 主仓 · [Gitee 镜像](https://gitee.com/huang-lin-java/d-trash)
+
 为 DeepSeek Harness（DSH）提供独立的会话回收站，支持恢复与永久删除本地会话日志。
 
 ## 解决什么问题
