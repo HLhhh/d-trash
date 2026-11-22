@@ -1,5 +1,5 @@
 {
-  "name": "trash",
+  "name": "d-trash",
   "version": "0.1.0",
   "description": "Session trash, restore, and permanent local session log deletion for DeepSeek Harness",
   "type": "module",
@@ -96,11 +96,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/HLhhh/trash.git"
+    "url": "git+https://github.com/HLhhh/d-trash.git"
   },
-  "homepage": "https://github.com/HLhhh/trash#readme",
+  "homepage": "https://github.com/HLhhh/d-trash#readme",
   "bugs": {
-    "url": "https://github.com/HLhhh/trash/issues"
+    "url": "https://github.com/HLhhh/d-trash/issues"
   },
   "keywords": [
     "dsh",

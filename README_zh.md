@@ -1,4 +1,4 @@
-# trash
+# d-trash
 
 [English](./README.md) · [技术细节](./docs/DETAIL.md) · [变更记录](./CHANGELOG.md)
 
@@ -6,7 +6,7 @@
 
 ## 解决什么问题
 
-历史会话越来越多，侧栏难以整理。原生归档可以隐藏会话，但没有独立的回收站。`trash` 提供集中查看、恢复或删除本地日志的入口。
+历史会话越来越多，侧栏难以整理。原生归档可以隐藏会话，但没有独立的回收站。`d-trash` 提供集中查看、恢复或删除本地日志的入口。
 
 ## 功能
 
@@ -25,18 +25,18 @@
 使用本地 checkout：
 
 ```sh
-git clone https://github.com/HLhhh/trash.git
-cd trash
+git clone https://github.com/HLhhh/d-trash.git
+cd d-trash
 npm install
 ```
 
 可直接使用随仓库提交的 `dist/`。修改源码或需要重新生成产物时，安装前执行一次 `npm install && npm run build`。
 
-打开 DSH **Plugins → Add plugin**，填写 checkout 的绝对目录路径（在 checkout 中运行 `pwd` 获取）。GitHub 仓库公开后，也可填写 git 规格 **`github:HLhhh/trash`**。
+打开 DSH **Plugins → Add plugin**，填写 checkout 的绝对目录路径（在 checkout 中运行 `pwd` 获取）。GitHub 仓库公开后，也可填写 git 规格 **`github:HLhhh/d-trash`**。
 
 Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为同一绝对目录或 git 规格。选择目标 profile，并按管理器返回的结果启用或重启。安装会影响该 profile 的所有会话。
 
-这些说明不假定已发布 npm 包；确认本项目拥有 npm 裸名并完成发布前，请勿直接从 registry 安装 `trash`。
+这些说明不假定已发布 npm 包；确认本项目拥有 npm 裸名并完成发布前，请勿直接从 registry 安装 `d-trash`。
 
 ## 使用
 

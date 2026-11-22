@@ -4,7 +4,7 @@
 
 DSH 插件 bundle：给会话加「收进回收站」动作，把历史对话收进独立的「回收站」，左侧栏显示回收站列表，支持恢复 / 彻底删除 / 清空（第 4 期起物理删除）。
 
-- 形态：Host + Client 两半，安装到 desktop profile；公开包名 `trash`，仓库 `HLhhh/trash`，MIT。
+- 形态：Host + Client 两半，安装到 desktop profile；公开包名 `d-trash`，仓库 `HLhhh/d-trash`，MIT。
 - 方案唯一来源：`PLAN.md`。方案变了原地改 PLAN.md，不新开文件；每期写清目标/范围/做法/验收标准/明确不做什么。
 
 ## 技术约定

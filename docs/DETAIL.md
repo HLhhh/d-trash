@@ -1,4 +1,4 @@
-# Trash — 第 1–4 期（会话回收站与物理删除）
+# d-trash — 第 1–4 期（会话回收站与物理删除）
 
 第 1–4 期已交付。收进保留日志并归档；普通恢复不变；彻底删除与清空现为物理删除本地会话日志、不可恢复。
 方案以随包提供的 `PLAN.md` 为准。既有真机入口和第 4 期两个会话的清理验收已通过（用户既有记录）；
@@ -189,7 +189,7 @@ SIGKILL 回归按真实两层目录枚举规则验证重启前后残留不可发
 队列失败后重试、symlink 拒绝、无可靠 home 降级，以及跨 Host 操作/多个 logger 实例/两个子进程并发追加。
 全部 37 个文件系统场景也逐条核对 Host report 已落盘，SIGKILL 回归额外核对 `renamed` 记录仍在磁盘。
 
-公开包身份为 `trash@0.1.0`，MIT，目标仓库 `HLhhh/trash`；版本不对应期号。locale 的 `meta.detail` 指向此文档，packed 文件包含 PLAN、
+公开包身份为 `d-trash@0.1.0`，MIT，目标仓库 `HLhhh/d-trash`；版本不对应期号。locale 的 `meta.detail` 指向此文档，packed 文件包含 PLAN、
 docs、双语 README、LICENSE、CHANGELOG、locale、icon、patch 和运行产物；`dist/` 随仓库提交，`CODEX_*.md` 仅本地保留。
 Cordis peer 为 `^4.1.0`，DSH peers 为 `^0.2.2-rc.5`，node-addon-system peer 为 `^0.1.2`；开发依赖保持精确，
 Node 要求 `^22.19.0 || >=24.0.0`。这些声明区间不代表后续 DSH 版本已验证。Client id 复用 manifest 生成的 contribution.package；测试和夹具读取 manifest.name。

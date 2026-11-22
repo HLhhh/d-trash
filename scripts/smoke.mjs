@@ -10,6 +10,11 @@ const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.
 const { default: TrashService } = await import(manifest.name)
 const { TYPERT } = await import(`${manifest.name}/typert`)
 const { default: remoteInfo } = await import(`${manifest.name}/remote`)
+assert.equal(manifest.name, 'd-trash')
+assert.equal(TYPERT.package, manifest.name)
+assert.equal(remoteInfo.package, manifest.name)
+const methods = ['emptyTrash', 'listTrash', 'removeFromTrash', 'restoreSession', 'trashSession']
+assert.deepEqual(Object.keys(remoteInfo.methods).sort(), methods.map(method => `trash/${method}`))
 
 const records = new Map()
 const archived = new Set()
@@ -18,7 +23,10 @@ let opened = 0
 let closed = 0
 let failArchive = false
 const ctx = new Context()
-ctx.provide('storageDomain', { open: async () => {
+ctx.provide('storageDomain', { open: async spec => {
+  assert.equal(spec.name, 'trash', 'package renames must preserve existing marker storage')
+  assert.equal(spec.version, 1)
+  assert.deepEqual(Object.keys(spec.tables), ['trash'])
   opened++
   return {
     table: () => ({
@@ -191,6 +199,9 @@ assert.throws(() => pluginContext.remote.trash,
 assert.ok(pluginContext.get('remote.trash'), 'ctx.get is legal inside the real plugin fiber')
 assert.equal(remoteMounted, true)
 assert.equal(entries.size, 4)
+assert.deepEqual([...entries.keys()].sort(), ['trash', 'trash-action', 'trash-main', 'trash-menu'])
+assert.equal(entries.get('trash-main').options.key, 'trash')
+for (const entry of entries.values()) assert.equal(entry.options.locale, 'trash')
 assert.equal(entries.get('trash-menu').options.name, 'sidebar.workspaces.session.menu.item')
 assert.equal(entries.get('trash-menu').options.order, 350)
 assert.equal(entries.get('trash-action').options.name, 'sidebar.workspaces.session.row.action')

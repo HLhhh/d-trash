@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "回收站",
+    "title": "d-trash",
     "description": "管理会话回收站，物理删除本地会话日志。",
     "detail": "docs/DETAIL.md"
   },

@@ -74,6 +74,56 @@ async function main() {
     dsh: installed('@deepseek-ai/dsh/package.json').version })
   const evidence = await require('./workspace-evidence.cjs')(installed, emit)
   const { ClientWorkspaceModel, visibleSessionIds, WorkspaceController } = evidence
+  // Load an existing version-1 trash.json with the installed JSON backend.
+  // This entire home is synthetic; no real marker file or session is touched.
+  const { JsonStorageBackend } = installed('@deepseek-ai/dsh-storage-json')
+  const { DomainFacility } = installed('@deepseek-ai/dsh-storage-domain')
+  const TrashService = (await import('../dist/index.js')).default
+  const storageRoot = path.join(temporary, 'legacy-home', 'storages')
+  fs.mkdirSync(storageRoot, { recursive: true })
+  const legacyFile = path.join(storageRoot, 'trash.json')
+  const legacy = { trashedAt: 1, workspaceId: 'legacy-workspace', titleSnapshot: 'Saved marker' }
+  const pending = { trashedAt: 2, purge: {
+    source: path.join(temporary, 'legacy-home', 'sessions', 'cwd', 'pending'),
+    target: path.join(temporary, 'legacy-home', 'sessions.trash-purge-staging', 'pending-test'),
+    dev: '1', ino: '2', logsDeleted: false, deleting: false,
+  } }
+  fs.writeFileSync(legacyFile, JSON.stringify({ unit: { name: 'trash', version: 1 },
+    global: null, tables: { trash: { legacy, pending } } }))
+  const original = fs.readFileSync(legacyFile, 'utf8')
+  for (let round = 0; round < 2; round++) {
+    const ctx = context()
+    const backend = new JsonStorageBackend(storageRoot)
+    const archived = new Set(['legacy'])
+    ctx.provide('storage', { backend: { get: () => backend } })
+    const facility = new DomainFacility(ctx, { backend: 'json' })
+    ctx.provide('storageDomain', facility)
+    ctx.provide('workspaceRegistry', { list: () => [],
+      get archivedSessionIds() { return [...archived] },
+      async unarchiveSession(id) { archived.delete(id) },
+    })
+    const trash = new TrashService(ctx)
+    try {
+      assert.deepEqual(await trash.listTrash(), [
+        ['legacy', legacy], ['pending', { trashedAt: 2, purgePending: true }],
+      ])
+      assert.ok(facility.get('trash'))
+      assert.equal(facility.get(manifest.name), undefined)
+      assert.equal(fs.readFileSync(legacyFile, 'utf8'), original, 'reading must preserve legacy data and purge receipts')
+      if (round === 1) {
+        await trash.restoreSession('legacy')
+        const saved = JSON.parse(fs.readFileSync(legacyFile, 'utf8'))
+        assert.deepEqual(saved.unit, { name: 'trash', version: 1 })
+        assert.deepEqual(saved.tables.trash, { pending })
+      }
+      assert.deepEqual(fs.readdirSync(storageRoot), ['trash.json'])
+    } finally {
+      await ctx.fiber.dispose()
+      await backend.close()
+    }
+  }
+  emit('package-rename-storage-compatibility', { package: manifest.name, domain: 'trash',
+    version: 1, file: 'trash.json', reopened: true, restored: true, purgeReceiptPreserved: true })
   for (const name of ['dsh-app-boot', 'dsh-typert-loader', 'cordis']) {
     emit('installed-package', { name, manifest: installed.resolve(`@deepseek-ai/${name}/package.json`) })
   }
@@ -95,6 +145,7 @@ async function main() {
   await typertLoader.apply(fresh.ctx, { packages: [] })
   assert.equal(fresh.registrations.length, 1)
   const contribution = fresh.registrations[0]
+  assert.equal(contribution.package, manifest.name)
   assert.equal(contribution.invocations.length, 5)
   emit('resolveArtifact', { artifact: path.join(root, 'dist/typert.host.js'),
     registrations: fresh.registrations.length, services: contribution.model.services.map(s => s.key),

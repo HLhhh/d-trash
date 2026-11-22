@@ -3,36 +3,36 @@ import { z } from 'zod'
 
 import { createTypertRemoteInfo } from '@deepseek-ai/dsh-typert-protocol/remote-info'
 
-let trash_trash_emptyTrash_result$schema$value
-const trash_trash_emptyTrash_result$schema = () => (trash_trash_emptyTrash_result$schema$value ??= z.number())
-let trash_trash_listTrash_result$schema$value
-const trash_trash_listTrash_result$schema = () => (trash_trash_listTrash_result$schema$value ??= z.array(z.tuple([z.string(), z.object({
+let d_trash_trash_emptyTrash_result$schema$value
+const d_trash_trash_emptyTrash_result$schema = () => (d_trash_trash_emptyTrash_result$schema$value ??= z.number())
+let d_trash_trash_listTrash_result$schema$value
+const d_trash_trash_listTrash_result$schema = () => (d_trash_trash_listTrash_result$schema$value ??= z.array(z.tuple([z.string(), z.object({
   'purgePending': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional().describe('Host retains a private purge receipt; show diagnosis and allow deletion retry.'),
   'trashedAt': z.number(),
   'workspaceId': z.union([z.undefined(), z.string()]).optional(),
   'titleSnapshot': z.union([z.undefined(), z.string()]).optional(),
 })])))
-let trash_trash_removeFromTrash_parameter_0$schema$value
-const trash_trash_removeFromTrash_parameter_0$schema = () => (trash_trash_removeFromTrash_parameter_0$schema$value ??= z.string())
-let trash_trash_removeFromTrash_result$schema$value
-const trash_trash_removeFromTrash_result$schema = () => (trash_trash_removeFromTrash_result$schema$value ??= z.boolean())
-let trash_trash_restoreSession_parameter_0$schema$value
-const trash_trash_restoreSession_parameter_0$schema = () => (trash_trash_restoreSession_parameter_0$schema$value ??= z.string())
-let trash_trash_restoreSession_result$schema$value
-const trash_trash_restoreSession_result$schema = () => (trash_trash_restoreSession_result$schema$value ??= z.void())
-let trash_trash_trashSession_parameter_0$schema$value
-const trash_trash_trashSession_parameter_0$schema = () => (trash_trash_trashSession_parameter_0$schema$value ??= z.string())
-let trash_trash_trashSession_result$schema$value
-const trash_trash_trashSession_result$schema = () => (trash_trash_trashSession_result$schema$value ??= z.void())
-let trash_trash_removeFromTrash_parameter_0_strict$schema$value
-const trash_trash_removeFromTrash_parameter_0_strict$schema = () => (trash_trash_removeFromTrash_parameter_0_strict$schema$value ??= z.string())
-let trash_trash_restoreSession_parameter_0_strict$schema$value
-const trash_trash_restoreSession_parameter_0_strict$schema = () => (trash_trash_restoreSession_parameter_0_strict$schema$value ??= z.string())
-let trash_trash_trashSession_parameter_0_strict$schema$value
-const trash_trash_trashSession_parameter_0_strict$schema = () => (trash_trash_trashSession_parameter_0_strict$schema$value ??= z.string())
+let d_trash_trash_removeFromTrash_parameter_0$schema$value
+const d_trash_trash_removeFromTrash_parameter_0$schema = () => (d_trash_trash_removeFromTrash_parameter_0$schema$value ??= z.string())
+let d_trash_trash_removeFromTrash_result$schema$value
+const d_trash_trash_removeFromTrash_result$schema = () => (d_trash_trash_removeFromTrash_result$schema$value ??= z.boolean())
+let d_trash_trash_restoreSession_parameter_0$schema$value
+const d_trash_trash_restoreSession_parameter_0$schema = () => (d_trash_trash_restoreSession_parameter_0$schema$value ??= z.string())
+let d_trash_trash_restoreSession_result$schema$value
+const d_trash_trash_restoreSession_result$schema = () => (d_trash_trash_restoreSession_result$schema$value ??= z.void())
+let d_trash_trash_trashSession_parameter_0$schema$value
+const d_trash_trash_trashSession_parameter_0$schema = () => (d_trash_trash_trashSession_parameter_0$schema$value ??= z.string())
+let d_trash_trash_trashSession_result$schema$value
+const d_trash_trash_trashSession_result$schema = () => (d_trash_trash_trashSession_result$schema$value ??= z.void())
+let d_trash_trash_removeFromTrash_parameter_0_strict$schema$value
+const d_trash_trash_removeFromTrash_parameter_0_strict$schema = () => (d_trash_trash_removeFromTrash_parameter_0_strict$schema$value ??= z.string())
+let d_trash_trash_restoreSession_parameter_0_strict$schema$value
+const d_trash_trash_restoreSession_parameter_0_strict$schema = () => (d_trash_trash_restoreSession_parameter_0_strict$schema$value ??= z.string())
+let d_trash_trash_trashSession_parameter_0_strict$schema$value
+const d_trash_trash_trashSession_parameter_0_strict$schema = () => (d_trash_trash_trashSession_parameter_0_strict$schema$value ??= z.string())
 
 export const TYPERT_REMOTE = createTypertRemoteInfo({
-  package: 'trash',
+  package: 'd-trash',
   methods: {
     'trash/emptyTrash': {
       service: 'trash',
@@ -42,8 +42,8 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
       ],
       result: {
         mode: 'strict',
-        typeSymbol: 'trash#trash/emptyTrash:result',
-        create: trash_trash_emptyTrash_result$schema,
+        typeSymbol: 'd-trash#trash/emptyTrash:result',
+        create: d_trash_trash_emptyTrash_result$schema,
         jsonSchema: {"type":"number"},
       },
       sourceLocation: {"file":"packages/trash/src/index.ts","line":134,"column":9},
@@ -56,8 +56,8 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
       ],
       result: {
         mode: 'strict',
-        typeSymbol: 'trash#trash/listTrash:result',
-        create: trash_trash_listTrash_result$schema,
+        typeSymbol: 'd-trash#trash/listTrash:result',
+        create: d_trash_trash_listTrash_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported selected tuple type',
       },
       sourceLocation: {"file":"packages/trash/src/index.ts","line":273,"column":9},
@@ -73,21 +73,21 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
           codec: {
             mode: 'strict',
             typeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
-            create: trash_trash_removeFromTrash_parameter_0$schema,
+            create: d_trash_trash_removeFromTrash_parameter_0$schema,
             jsonSchema: {"type":"string"},
           },
           strictCodec: {
             mode: 'strict',
             typeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
-            create: trash_trash_removeFromTrash_parameter_0_strict$schema,
+            create: d_trash_trash_removeFromTrash_parameter_0_strict$schema,
             jsonSchema: {"type":"string"},
           },
         },
       ],
       result: {
         mode: 'strict',
-        typeSymbol: 'trash#trash/removeFromTrash:result',
-        create: trash_trash_removeFromTrash_result$schema,
+        typeSymbol: 'd-trash#trash/removeFromTrash:result',
+        create: d_trash_trash_removeFromTrash_result$schema,
         jsonSchema: {"type":"boolean"},
       },
       sourceLocation: {"file":"packages/trash/src/index.ts","line":125,"column":9},
@@ -103,21 +103,21 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
           codec: {
             mode: 'strict',
             typeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
-            create: trash_trash_restoreSession_parameter_0$schema,
+            create: d_trash_trash_restoreSession_parameter_0$schema,
             jsonSchema: {"type":"string"},
           },
           strictCodec: {
             mode: 'strict',
             typeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
-            create: trash_trash_restoreSession_parameter_0_strict$schema,
+            create: d_trash_trash_restoreSession_parameter_0_strict$schema,
             jsonSchema: {"type":"string"},
           },
         },
       ],
       result: {
         mode: 'strict',
-        typeSymbol: 'trash#trash/restoreSession:result',
-        create: trash_trash_restoreSession_result$schema,
+        typeSymbol: 'd-trash#trash/restoreSession:result',
+        create: d_trash_trash_restoreSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
       sourceLocation: {"file":"packages/trash/src/index.ts","line":103,"column":9},
@@ -133,21 +133,21 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
           codec: {
             mode: 'strict',
             typeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
-            create: trash_trash_trashSession_parameter_0$schema,
+            create: d_trash_trash_trashSession_parameter_0$schema,
             jsonSchema: {"type":"string"},
           },
           strictCodec: {
             mode: 'strict',
             typeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
-            create: trash_trash_trashSession_parameter_0_strict$schema,
+            create: d_trash_trash_trashSession_parameter_0_strict$schema,
             jsonSchema: {"type":"string"},
           },
         },
       ],
       result: {
         mode: 'strict',
-        typeSymbol: 'trash#trash/trashSession:result',
-        create: trash_trash_trashSession_result$schema,
+        typeSymbol: 'd-trash#trash/trashSession:result',
+        create: d_trash_trash_trashSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
       sourceLocation: {"file":"packages/trash/src/index.ts","line":71,"column":9},

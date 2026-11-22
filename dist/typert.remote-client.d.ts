@@ -5,7 +5,7 @@ import type {
   TypertRemoteMethod,
 } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { TrashRecord } from 'trash/types'
+import type { TrashRecord } from 'd-trash/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$7472617368 {

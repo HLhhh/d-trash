@@ -1,8 +1,8 @@
-# Trash（回收站）方案
+# d-trash（回收站）方案
 
 > **已交付**：第 0–4 期及评审修复、持久化操作日志（2026-11-22）。既有真机验收已通过：第 2 期入口和第 4 期两个会话的物理清理；详见本文验收记录。
 > 本次开源整理只改插件项目、运行隔离验证；没有安装/重载 bundle、修改核心/profile、启动 web server 或操作真实会话，不代表本轮完成真机复验。
-> 形态：DSH Host + Client bundle；包 `trash`，版本 `0.1.0`；插件 id / 服务 / Remote namespace / 面板 id 与 key 均为 `trash`。
+> 形态：DSH Host + Client bundle；包 `d-trash`，版本 `0.1.0`；插件 id / 服务 / Remote namespace / 面板 id 与 key 均为 `trash`。
 
 本文是唯一方案源。以下描述**当前累计实现**；各期标注职责来源，不要求最终代码保持当期的中间形态。历史逻辑删除方案已废弃，因为第 4 期明确升级为物理删除。
 
@@ -20,7 +20,7 @@
 | UI / i18n | 惰性 ModuleLoader 工厂，只从浏览器模块表取 React；locale JSON 为中英文案唯一源；样式用 `--dsw-alias-*` |
 | 删除清理面 | 本地会话目录、工作区成员记录、归档集合、marker；尝试清理投影缓存。搜索索引依赖已有同步收敛 |
 | 保留范围 | 附件、工作区文件、Git worktree、产物、远端/独立服务端日志、备份及其它插件的扫描快照均保留 |
-| 版本与发布 | `trash@0.1.0`，MIT，目标仓库 `HLhhh/trash`；不用期号充当版本；本轮只整理可公开仓库，不执行发布 |
+| 版本与发布 | `d-trash@0.1.0`，MIT，目标仓库 `HLhhh/d-trash`；不用期号充当版本；本轮只整理可公开仓库，不执行发布 |
 
 ## 第 0 期：框架、状态模型与架构 — 已交付
 
@@ -113,11 +113,11 @@ Client: ModuleLoader 惰性 React 工厂（$mount 后 ctx.get('remote.trash')）
 ### 0.6 文件结构
 
 ```text
-projects/trash/
+d-trash/
 ├── README.md / README_zh.md / LICENSE / CHANGELOG.md
 ├── PLAN.md / AGENTS.md          # 唯一方案 / 工程与领域约束
 ├── package.json / package-lock.json / tsconfig.json
-├── cordis.patch.yml            # insert id=trash, name=trash
+├── cordis.patch.yml            # insert id=trash, name=d-trash
 ├── src/
 │   ├── index.ts                # TrashService、domain、补偿/队列/Remote、purge 编排
 │   ├── purge.ts                # SessionPurger、路径/身份门禁、官方 flock、暂存/恢复/删除
@@ -309,7 +309,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 
 ### 目标与范围
 
-将已交付插件整理为可公开的 `HLhhh/trash` 仓库；包名统一为 `trash`，版本保持 0.1.0。只调整包身份、分发元数据、测试夹具与文档，不改变状态、物理删除、日志或授权边界。
+将已交付插件整理为可公开的 `HLhhh/d-trash` 仓库；当前包名为 `d-trash`，版本保持 0.1.0。只调整包身份、分发元数据、测试夹具与文档，不改变状态、物理删除、日志或授权边界。
 
 ### 做法
 
@@ -320,8 +320,29 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 
 ### 验收标准与结果
 
-`npm run build`、`npm test`、`npm run test:discovery` 和 `npm pack --dry-run --json` 全部退出 0。Node 26.10.0 / npm 11.19.1 完成构建和默认回归；安装版 Electron 44.7.0（Node 24.21.0、DSH 0.2.2-rc.5）完成隔离 discovery，确认模块身份为 trash、五个 Remote 与四个 slot。37 个真实文件系统场景和 21 个日志场景在 Node / Electron 各通过一次。打包清单共 57 个文件，运行资源、源码、脚本、双语 README/LICENSE/CHANGELOG 完整，本地 CODEX 报告和 node_modules 未分发。profile-boot 仅语法检查，未执行。详细输出保留于本地 CODEX_OPENSOURCE.md。
+`npm run build`、`npm test`、`npm run test:discovery` 和 `npm pack --dry-run --json` 全部退出 0。Node 26.10.0 / npm 11.19.1 完成构建和默认回归；安装版 Electron 44.7.0（Node 24.21.0、DSH 0.2.2-rc.5）完成隔离 discovery，确认当时的模块身份、五个 Remote 与四个 slot（历史包身份见 CODEX_OPENSOURCE.md）。37 个真实文件系统场景和 21 个日志场景在 Node / Electron 各通过一次。打包清单共 57 个文件，运行资源、源码、脚本、双语 README/LICENSE/CHANGELOG 完整，本地 CODEX 报告和 node_modules 未分发。profile-boot 仅语法检查，未执行。详细输出保留于本地 CODEX_OPENSOURCE.md。
 
 ### 明确不做什么
 
-不 git init/add/commit/push，不发布 npm 或创建镜像，不调用 plugin_manager、不安装/启用/重载 bundle、不改 profile/核心、不操作真实会话。没有本轮真机复验；发布、裸包名所有权确认与安装版迁移另行处理。
+不 git init/add/commit/push，不发布 npm 或创建镜像，不调用 plugin_manager、不安装/启用/重载 bundle、不改 profile/核心、不操作真实会话。没有本轮真机复验；npm 发布、裸包名所有权与安装版迁移另行处理。
+
+## 包身份最终定名 — 已交付（2026-11-22）
+
+### 目标与范围
+
+公开包身份统一为 `d-trash@0.1.0`，仓库为 `HLhhh/d-trash`。此前候选命名已废弃，因为用户最终确认使用全小写带连字符的 `d-trash`。版本不变；只更新分发身份、展示标题、文档与对应回归。
+
+### 做法
+
+- 同步 package.json 的 name/repository/homepage/bugs、lockfile 两处根 name、patch 的 name、双语 locale meta.title；README 安装命令与所有当前包身份说明保持一致。
+- 从 manifest 重建 dist，Host Typert package、Remote contribution.package 和 Client 注册 id 均为 `d-trash`；生成器的临时源码目录仍为 trash，无需改内部路径。
+- 保留 domain/table `trash`、domain version 1、Host 服务/typert namespace、五个 Remote 方法和 `trash/*` 路径、patch id、slot id、main key、locale namespace 与 `trash.log`。Host/Client 业务源码未改。
+- smoke 显式断言包身份与内部标识；discovery 使用安装版 DomainFacility 和 JsonStorageBackend，在合成临时 home 预置 version 1 的 `trash.json`，验证读取、关闭重开、恢复写回及 purge 凭据保留。
+
+### 验收标准与结果
+
+`npm run build`、`npm test`、安装版 Electron 的 `npm run test:discovery`、`npm pack --dry-run --json` 均通过。pack 使用临时 npm cache，避免默认缓存目录的权限问题。domain 仍为 `trash`，旧 marker 元数据与待删除凭据兼容；不会新建 `d-trash.json`。当前公开文件和生成产物无旧候选名残留，历史 CODEX 记录仅作当时证据；本轮细节见本地 `CODEX_DTRASH.md`。
+
+### 明确不做什么
+
+不改内部 id 或存储 schema，不迁移/读取真实 marker，不执行真实会话删除；不 commit/push、不调用 plugin_manager、不改 profile、不发布 npm。本轮为隔离回归，没有重新执行真机验收。

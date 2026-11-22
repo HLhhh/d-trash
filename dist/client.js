@@ -8,7 +8,7 @@
   // locale/en.json
   var en_default = {
     meta: {
-      title: "Trash",
+      title: "d-trash",
       description: "Manage session trash and permanently delete local session logs.",
       detail: "docs/DETAIL.md"
     },
@@ -43,7 +43,7 @@
   // locale/zh.json
   var zh_default = {
     meta: {
-      title: "\u56DE\u6536\u7AD9",
+      title: "d-trash",
       description: "\u7BA1\u7406\u4F1A\u8BDD\u56DE\u6536\u7AD9\uFF0C\u7269\u7406\u5220\u9664\u672C\u5730\u4F1A\u8BDD\u65E5\u5FD7\u3002",
       detail: "docs/DETAIL.md"
     },
@@ -20610,35 +20610,35 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   };
 
   // dist/typert.remote-client.js
-  var trash_trash_emptyTrash_result$schema$value;
-  var trash_trash_emptyTrash_result$schema = () => trash_trash_emptyTrash_result$schema$value ??= external_exports.number();
-  var trash_trash_listTrash_result$schema$value;
-  var trash_trash_listTrash_result$schema = () => trash_trash_listTrash_result$schema$value ??= external_exports.array(external_exports.tuple([external_exports.string(), external_exports.object({
+  var d_trash_trash_emptyTrash_result$schema$value;
+  var d_trash_trash_emptyTrash_result$schema = () => d_trash_trash_emptyTrash_result$schema$value ??= external_exports.number();
+  var d_trash_trash_listTrash_result$schema$value;
+  var d_trash_trash_listTrash_result$schema = () => d_trash_trash_listTrash_result$schema$value ??= external_exports.array(external_exports.tuple([external_exports.string(), external_exports.object({
     "purgePending": external_exports.union([external_exports.undefined(), external_exports.literal(false), external_exports.literal(true)]).optional().describe("Host retains a private purge receipt; show diagnosis and allow deletion retry."),
     "trashedAt": external_exports.number(),
     "workspaceId": external_exports.union([external_exports.undefined(), external_exports.string()]).optional(),
     "titleSnapshot": external_exports.union([external_exports.undefined(), external_exports.string()]).optional()
   })]));
-  var trash_trash_removeFromTrash_parameter_0$schema$value;
-  var trash_trash_removeFromTrash_parameter_0$schema = () => trash_trash_removeFromTrash_parameter_0$schema$value ??= external_exports.string();
-  var trash_trash_removeFromTrash_result$schema$value;
-  var trash_trash_removeFromTrash_result$schema = () => trash_trash_removeFromTrash_result$schema$value ??= external_exports.boolean();
-  var trash_trash_restoreSession_parameter_0$schema$value;
-  var trash_trash_restoreSession_parameter_0$schema = () => trash_trash_restoreSession_parameter_0$schema$value ??= external_exports.string();
-  var trash_trash_restoreSession_result$schema$value;
-  var trash_trash_restoreSession_result$schema = () => trash_trash_restoreSession_result$schema$value ??= external_exports.void();
-  var trash_trash_trashSession_parameter_0$schema$value;
-  var trash_trash_trashSession_parameter_0$schema = () => trash_trash_trashSession_parameter_0$schema$value ??= external_exports.string();
-  var trash_trash_trashSession_result$schema$value;
-  var trash_trash_trashSession_result$schema = () => trash_trash_trashSession_result$schema$value ??= external_exports.void();
-  var trash_trash_removeFromTrash_parameter_0_strict$schema$value;
-  var trash_trash_removeFromTrash_parameter_0_strict$schema = () => trash_trash_removeFromTrash_parameter_0_strict$schema$value ??= external_exports.string();
-  var trash_trash_restoreSession_parameter_0_strict$schema$value;
-  var trash_trash_restoreSession_parameter_0_strict$schema = () => trash_trash_restoreSession_parameter_0_strict$schema$value ??= external_exports.string();
-  var trash_trash_trashSession_parameter_0_strict$schema$value;
-  var trash_trash_trashSession_parameter_0_strict$schema = () => trash_trash_trashSession_parameter_0_strict$schema$value ??= external_exports.string();
+  var d_trash_trash_removeFromTrash_parameter_0$schema$value;
+  var d_trash_trash_removeFromTrash_parameter_0$schema = () => d_trash_trash_removeFromTrash_parameter_0$schema$value ??= external_exports.string();
+  var d_trash_trash_removeFromTrash_result$schema$value;
+  var d_trash_trash_removeFromTrash_result$schema = () => d_trash_trash_removeFromTrash_result$schema$value ??= external_exports.boolean();
+  var d_trash_trash_restoreSession_parameter_0$schema$value;
+  var d_trash_trash_restoreSession_parameter_0$schema = () => d_trash_trash_restoreSession_parameter_0$schema$value ??= external_exports.string();
+  var d_trash_trash_restoreSession_result$schema$value;
+  var d_trash_trash_restoreSession_result$schema = () => d_trash_trash_restoreSession_result$schema$value ??= external_exports.void();
+  var d_trash_trash_trashSession_parameter_0$schema$value;
+  var d_trash_trash_trashSession_parameter_0$schema = () => d_trash_trash_trashSession_parameter_0$schema$value ??= external_exports.string();
+  var d_trash_trash_trashSession_result$schema$value;
+  var d_trash_trash_trashSession_result$schema = () => d_trash_trash_trashSession_result$schema$value ??= external_exports.void();
+  var d_trash_trash_removeFromTrash_parameter_0_strict$schema$value;
+  var d_trash_trash_removeFromTrash_parameter_0_strict$schema = () => d_trash_trash_removeFromTrash_parameter_0_strict$schema$value ??= external_exports.string();
+  var d_trash_trash_restoreSession_parameter_0_strict$schema$value;
+  var d_trash_trash_restoreSession_parameter_0_strict$schema = () => d_trash_trash_restoreSession_parameter_0_strict$schema$value ??= external_exports.string();
+  var d_trash_trash_trashSession_parameter_0_strict$schema$value;
+  var d_trash_trash_trashSession_parameter_0_strict$schema = () => d_trash_trash_trashSession_parameter_0_strict$schema$value ??= external_exports.string();
   var TYPERT_REMOTE = createTypertRemoteInfo({
-    package: "trash",
+    package: "d-trash",
     methods: {
       "trash/emptyTrash": {
         service: "trash",
@@ -20647,8 +20647,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         parameters: [],
         result: {
           mode: "strict",
-          typeSymbol: "trash#trash/emptyTrash:result",
-          create: trash_trash_emptyTrash_result$schema,
+          typeSymbol: "d-trash#trash/emptyTrash:result",
+          create: d_trash_trash_emptyTrash_result$schema,
           jsonSchema: { "type": "number" }
         },
         sourceLocation: { "file": "packages/trash/src/index.ts", "line": 134, "column": 9 }
@@ -20660,8 +20660,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         parameters: [],
         result: {
           mode: "strict",
-          typeSymbol: "trash#trash/listTrash:result",
-          create: trash_trash_listTrash_result$schema,
+          typeSymbol: "d-trash#trash/listTrash:result",
+          create: d_trash_trash_listTrash_result$schema,
           jsonSchemaError: "typert tool schema: unsupported selected tuple type"
         },
         sourceLocation: { "file": "packages/trash/src/index.ts", "line": 273, "column": 9 }
@@ -20677,21 +20677,21 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
             codec: {
               mode: "strict",
               typeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
-              create: trash_trash_removeFromTrash_parameter_0$schema,
+              create: d_trash_trash_removeFromTrash_parameter_0$schema,
               jsonSchema: { "type": "string" }
             },
             strictCodec: {
               mode: "strict",
               typeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
-              create: trash_trash_removeFromTrash_parameter_0_strict$schema,
+              create: d_trash_trash_removeFromTrash_parameter_0_strict$schema,
               jsonSchema: { "type": "string" }
             }
           }
         ],
         result: {
           mode: "strict",
-          typeSymbol: "trash#trash/removeFromTrash:result",
-          create: trash_trash_removeFromTrash_result$schema,
+          typeSymbol: "d-trash#trash/removeFromTrash:result",
+          create: d_trash_trash_removeFromTrash_result$schema,
           jsonSchema: { "type": "boolean" }
         },
         sourceLocation: { "file": "packages/trash/src/index.ts", "line": 125, "column": 9 }
@@ -20707,21 +20707,21 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
             codec: {
               mode: "strict",
               typeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
-              create: trash_trash_restoreSession_parameter_0$schema,
+              create: d_trash_trash_restoreSession_parameter_0$schema,
               jsonSchema: { "type": "string" }
             },
             strictCodec: {
               mode: "strict",
               typeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
-              create: trash_trash_restoreSession_parameter_0_strict$schema,
+              create: d_trash_trash_restoreSession_parameter_0_strict$schema,
               jsonSchema: { "type": "string" }
             }
           }
         ],
         result: {
           mode: "strict",
-          typeSymbol: "trash#trash/restoreSession:result",
-          create: trash_trash_restoreSession_result$schema,
+          typeSymbol: "d-trash#trash/restoreSession:result",
+          create: d_trash_trash_restoreSession_result$schema,
           jsonSchemaError: "typert tool schema: unsupported void value"
         },
         sourceLocation: { "file": "packages/trash/src/index.ts", "line": 103, "column": 9 }
@@ -20737,21 +20737,21 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
             codec: {
               mode: "strict",
               typeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
-              create: trash_trash_trashSession_parameter_0$schema,
+              create: d_trash_trash_trashSession_parameter_0$schema,
               jsonSchema: { "type": "string" }
             },
             strictCodec: {
               mode: "strict",
               typeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
-              create: trash_trash_trashSession_parameter_0_strict$schema,
+              create: d_trash_trash_trashSession_parameter_0_strict$schema,
               jsonSchema: { "type": "string" }
             }
           }
         ],
         result: {
           mode: "strict",
-          typeSymbol: "trash#trash/trashSession:result",
-          create: trash_trash_trashSession_result$schema,
+          typeSymbol: "d-trash#trash/trashSession:result",
+          create: d_trash_trash_trashSession_result$schema,
           jsonSchemaError: "typert tool schema: unsupported void value"
         },
         sourceLocation: { "file": "packages/trash/src/index.ts", "line": 71, "column": 9 }

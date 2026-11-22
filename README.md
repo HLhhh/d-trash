@@ -1,4 +1,4 @@
-# trash
+# d-trash
 
 [简体中文](./README_zh.md) · [Technical details](./docs/DETAIL.md) · [Changelog](./CHANGELOG.md)
 
@@ -6,7 +6,7 @@ A session recycle bin for DeepSeek Harness (DSH), with restore and permanent loc
 
 ## Why
 
-Long session histories make the sidebar hard to navigate. Native archiving hides sessions but does not provide a separate recycle bin. `trash` adds a place to review those sessions, restore them, or delete their local logs.
+Long session histories make the sidebar hard to navigate. Native archiving hides sessions but does not provide a separate recycle bin. `d-trash` adds a place to review those sessions, restore them, or delete their local logs.
 
 ## Features
 
@@ -25,18 +25,18 @@ Requires DSH **0.2.2-rc.5** and Node **`^22.19.0 || >=24.0.0`**. The repository 
 For a local checkout:
 
 ```sh
-git clone https://github.com/HLhhh/trash.git
-cd trash
+git clone https://github.com/HLhhh/d-trash.git
+cd d-trash
 npm install
 ```
 
 Use the committed `dist/` directly. If you edit the source or need to regenerate it, run `npm install && npm run build` once before installation.
 
-In DSH, open **Plugins → Add plugin** and enter the checkout's absolute directory path (run `pwd` in the checkout to obtain it). Once the GitHub repository is public, you can instead enter the git spec **`github:HLhhh/trash`**.
+In DSH, open **Plugins → Add plugin** and enter the checkout's absolute directory path (run `pwd` in the checkout to obtain it). Once the GitHub repository is public, you can instead enter the git spec **`github:HLhhh/d-trash`**.
 
 An agent can use **`plugin_manager` → `install_bundle`**, with `target` set to the same absolute directory or git spec. Select the intended profile and follow the manager's activation/restart result. Installation changes that profile for all its sessions.
 
-These instructions do not assume an npm release; do not use a bare `trash` registry install until this project's npm ownership and publication are confirmed.
+These instructions do not assume an npm release; do not use a bare `d-trash` registry install until this project's npm ownership and publication are confirmed.
 
 ## Usage
 
