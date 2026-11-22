@@ -1,0 +1,116 @@
+{
+  "name": "trash",
+  "version": "0.1.0",
+  "description": "Session trash, restore, and permanent local session log deletion for DeepSeek Harness",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    },
+    "./typert": {
+      "types": "./dist/typert.host.d.ts",
+      "default": "./dist/typert.host.js"
+    },
+    "./remote": {
+      "types": "./dist/typert.remote-client.d.ts",
+      "default": "./dist/typert.remote-client.js"
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "scripts",
+    "tsconfig.json",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "docs",
+    "PLAN.md",
+    "README.md",
+    "README_zh.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/generate-typert.mjs && node scripts/build-client.mjs",
+    "test": "node scripts/smoke.mjs",
+    "test:discovery": "ELECTRON_RUN_AS_NODE=1 \"$DSH_NODE_EXECUTABLE\" scripts/discovery.cjs"
+  },
+  "dependencies": {
+    "zod": "4.6.6"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-session": "^0.2.2-rc.5",
+    "@deepseek-ai/dsh-session-persistence": "^0.2.2-rc.5",
+    "@deepseek-ai/dsh-storage": "^0.2.2-rc.5",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.2-rc.5",
+    "@deepseek-ai/dsh-typert-protocol": "^0.2.2-rc.5",
+    "@deepseek-ai/dsh-workspace": "^0.2.2-rc.5",
+    "@deepseek-ai/node-addon-system": "^0.1.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-attachment": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-package-manifest": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-storage": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-storage-domain": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-typert-generator": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-workspace": "0.2.2-rc.5",
+    "@types/node": "24.19.2",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HLhhh/trash.git"
+  },
+  "homepage": "https://github.com/HLhhh/trash#readme",
+  "bugs": {
+    "url": "https://github.com/HLhhh/trash/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "trash",
+    "recycle-bin",
+    "session"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "title": "回收站",
+    "description": "管理会话回收站，物理删除本地会话日志。",
+    "detail": "docs/DETAIL.md"
+  },
+  "trash": {
+    "moveToTrash": "收进回收站",
+    "restore": "恢复",
+    "deleteForever": "彻底删除",
+    "emptyTrash": "清空回收站",
+    "moving": "正在收进回收站…",
+    "moveFailed": "收进回收站失败：{reason}",
+    "panelTitle": "回收站",
+    "emptyState": "回收站是空的",
+    "loading": "正在加载回收站…",
+    "refresh": "刷新",
+    "cancel": "取消",
+    "confirmDelete": "确认物理删除“{title}”？删除后不可恢复。",
+    "confirmEmpty": "确认物理删除回收站中的所有会话？删除后不可恢复。",
+    "loadFailed": "加载回收站失败：{reason}",
+    "restoreFailed": "恢复会话失败：{reason}",
+    "deleteFailed": "物理删除会话失败：{reason}",
+    "emptyFailed": "清空回收站失败：{reason}",
+    "working": "正在处理…",
+    "trashedAt": "收进时间：{time}",
+    "workspace": "所属工作区：{workspace}",
+    "unknownTime": "时间未知",
+    "noWorkspace": "无所属工作区",
+    "physicalDeletion": "物理删除将永久移除本地会话日志，不可恢复。",
+    "purgePending": "删除尚未完成，请重试物理删除以完成清理。"
+  }
+}

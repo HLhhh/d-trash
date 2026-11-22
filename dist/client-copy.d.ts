@@ -1,0 +1,56 @@
+/** Locale JSON is the single copy source; the browser build inlines it. */
+export declare const copy: {
+    en: {
+        moveToTrash: string;
+        restore: string;
+        deleteForever: string;
+        emptyTrash: string;
+        moving: string;
+        moveFailed: string;
+        panelTitle: string;
+        emptyState: string;
+        loading: string;
+        refresh: string;
+        cancel: string;
+        confirmDelete: string;
+        confirmEmpty: string;
+        loadFailed: string;
+        restoreFailed: string;
+        deleteFailed: string;
+        emptyFailed: string;
+        working: string;
+        trashedAt: string;
+        workspace: string;
+        unknownTime: string;
+        noWorkspace: string;
+        physicalDeletion: string;
+        purgePending: string;
+    };
+    zh: {
+        moveToTrash: string;
+        restore: string;
+        deleteForever: string;
+        emptyTrash: string;
+        moving: string;
+        moveFailed: string;
+        panelTitle: string;
+        emptyState: string;
+        loading: string;
+        refresh: string;
+        cancel: string;
+        confirmDelete: string;
+        confirmEmpty: string;
+        loadFailed: string;
+        restoreFailed: string;
+        deleteFailed: string;
+        emptyFailed: string;
+        working: string;
+        trashedAt: string;
+        workspace: string;
+        unknownTime: string;
+        noWorkspace: string;
+        physicalDeletion: string;
+        purgePending: string;
+    };
+};
+export type CopyKey = keyof typeof copy.en;

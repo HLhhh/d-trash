@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "title": "Trash",
+    "description": "Manage session trash and permanently delete local session logs.",
+    "detail": "docs/DETAIL.md"
+  },
+  "trash": {
+    "moveToTrash": "Move to trash",
+    "restore": "Restore",
+    "deleteForever": "Delete forever",
+    "emptyTrash": "Empty trash",
+    "moving": "Moving to trash…",
+    "moveFailed": "Could not move to trash: {reason}",
+    "panelTitle": "Trash",
+    "emptyState": "Trash is empty",
+    "loading": "Loading trash…",
+    "refresh": "Refresh",
+    "cancel": "Cancel",
+    "confirmDelete": "Physically delete “{title}”? This cannot be undone.",
+    "confirmEmpty": "Physically delete all sessions in trash? This cannot be undone.",
+    "loadFailed": "Could not load trash: {reason}",
+    "restoreFailed": "Could not restore session: {reason}",
+    "deleteFailed": "Could not physically delete session: {reason}",
+    "emptyFailed": "Could not empty trash: {reason}",
+    "working": "Working…",
+    "trashedAt": "Moved to trash: {time}",
+    "workspace": "Workspace: {workspace}",
+    "unknownTime": "Unknown time",
+    "noWorkspace": "No workspace",
+    "physicalDeletion": "Physical deletion permanently removes local session logs and cannot be undone.",
+    "purgePending": "Deletion is unfinished. Retry physical deletion to complete cleanup."
+  }
+}
