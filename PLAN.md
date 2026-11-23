@@ -150,7 +150,7 @@ d-trash/
 4. **物理删除范围**：仅 JSONL 且有可靠 stat/身份和 backend 兼容互斥。POSIX 要求既有普通锁文件与官方 flock；Windows 同名信号量不要求锁文件。原生支持缺失或身份不可靠均拒绝。macOS 已隔离验证，Windows 待用户原生代跑。
 5. **崩溃/升级**：覆盖进程崩溃，未增加断电级目录 fsync 事务。unknown-state 可隔离 domain，需重启读取凭据；pending 时不要降级旧版。非法或无凭据暂存不猜测删除。
 6. **派生数据**：投影删除失败为 warning，marker 可能已清掉，后续 purge 不保证自动重试缓存；索引依赖下一次稳定搜索观测的已有同步，不保证即时消失，不手改 SQLite。不额外清理其它插件快照。
-7. **日志**：best effort、无轮转/大小阈值/保留策略；无可靠 stat/source 或磁盘失败时降级 logger，不能当业务凭据或承诺每条必落盘。
+7. **日志**：best effort、固定 4 MiB 阈值与三份归档（下一次追加前轮转，约 16 MiB，非硬上限）；无可靠 stat/source 或磁盘失败时降级 logger，不能当业务凭据或承诺每条必落盘。
 8. **原生重建**：写租约只证明当前写者排他（POSIX inode / Windows 同名信号量），不能禁止 rename 后原生重建 source；恢复/记录清理发现替代 source 会拒绝，不承诺跨进程维护事务。成员检查同样不锁住原生归属变动。
 
 ### 验收标准与结果
@@ -268,7 +268,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 
 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`；detach 按实际尝试的所属工作区记，零归属不产生 detach 行。阶段失败按实际位置记录，projection 为 warning；已有字段与路径不变，日志行数不固定。
 
-操作前预定位并缓存 home；source 移走后复用已打开 marker 的 source；否则用目标 stat、其它 marker 或 persistence.list 候选再 stat。无可靠凭据/stat 时降级 logger，不猜路径。新目录 0700，日志文件 0600 且每次打开收紧，现有 logs 目录权限不改；拒绝 home/logs symlink、文件 symlink/非普通文件；O_APPEND、不截断，同进程按路径共享串行队列。每条等待追加完成，失败降级 ctx.logger.info（带原记录及 logError）；降级也失败则吞掉，后续可重试，不改变主操作结果。无轮转/大小阈值，不承诺 fsync，日志不充当业务提交凭据。
+操作前预定位并缓存 home；source 移走后复用已打开 marker 的 source；否则用目标 stat、其它 marker 或 persistence.list 候选再 stat。无可靠凭据/stat 时降级 logger，不猜路径。新目录 0700，日志文件 0600 且每次打开收紧，现有 logs 目录权限不改；拒绝 home/logs symlink、文件 symlink/非普通文件；O_APPEND、不截断，同进程按路径共享串行队列。每条等待追加完成，失败降级 ctx.logger.info（带原记录及 logError）；降级也失败则吞掉，后续可重试，不改变主操作结果。固定常量 MAX_BYTES=4 MiB、KEEP=3，超过阈值后在下一次追加前删除 .3、逆序改名并新建 0600 活动文件；轮转自身写 log-rotate 记录，失败只降级 logger，原业务结果不变。跨进程旧句柄可继续写轮转文件使 .1 偏大，不承诺跨进程强一致或 fsync，日志不充当业务提交凭据。详见下方日志轮转交付章节。
 
 ### 验收标准与结果
 
@@ -292,7 +292,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 | sidebar 与 main 联动 | **已解决**：四个 slot 注册与 id/key 配对已通过 discovery，既有面板删除验收通过 |
 | TS / Client external | **已解决**：tsc + Typert + esbuild；经典脚本内联 codecs/字典，只有工厂中的 React 从浏览器模块表获取，不设置 dsh.client.external |
 
-**待确认（未实施的行为扩展，不阻塞当前交付）**：若后续需要日志轮转/保留策略、搜索立即收敛/显式 rescan、其它持久化 backend、跨 Client revision、断电级 fsync 或无凭据残留管理，需先确认范围与官方能力，再修改方案和代码。本次未将任何一项视为授权。
+**待确认（未实施的行为扩展，不阻塞当前交付）**：若后续需要搜索立即收敛/显式 rescan、其它持久化 backend、跨 Client revision、断电级 fsync 或无凭据残留管理，需先确认范围与官方能力，再修改方案和代码。本次未将任何一项视为授权。
 
 ## 变更记录（压缩保留关键决策）
 
@@ -382,3 +382,36 @@ Windows 自检命令和预期通过/跳过数见 docs/DETAIL.md 的 Windows self
 
 不改核心/profile、不 install_bundle、不安装/启用插件、不操作真实会话、不发布或推送。不引入其它 backend、私有锁兜底、
 超时夺锁或跨设备 copy。Windows 原生结果由用户代跑提供；已有真机记录不作为本轮 Windows/rc.2 GUI 证明。
+
+
+## 审计日志大小轮转与保留 — 已交付（2026-11-23）
+
+### 目标与范围
+
+为 stat/source 反推 home 的 `logs/trash.log` 增加大小轮转和有限保留。此前「不轮转、无限增长」方案已废弃，因为用户明确要求限制审计历史。
+只修改日志实现、既有日志回归、构建产物与文档；包身份、内部 id、物理删除语义及门禁不变。
+
+### 做法
+
+- `src/operation-log.ts` 固定并导出 `MAX_BYTES = 4 * 1024 * 1024`、`KEEP = 3`，不依赖环境变量。
+  在现有按路径串行队列内，每次追加前检查活动文件；严格超限时删除 `.3`，逆序 `.2 → .3`、`.1 → .2`、活动 → `.1`，新建 0600 活动文件。
+  超限的整行先留在原文件，下一次追加才轮转；最多活动文件加三份归档，约 16 MiB，但大行、失败和跨进程旧句柄可超限。
+- 沿用六字段 JSONL；`log-rotate/complete/ok` 记录文件序号、保留范围、实际淘汰项与阈值；失败按实际步骤（含序号）记录到降级 logger，原业务记录单独降级。
+  轮转及新建失败不改变成功结果或原异常，logger 也失败时吞掉；后续调用继续尝试。无 fsync/每条必落盘承诺，日志仍不是 purge 凭据。
+- 活动和全部归档路径先拒绝 symlink/非普通文件；O_APPEND、单次 write 写完整记录，不截断已有行。
+  除 KEEP 明确淘汰的最旧一份，其余轮转行保持原内容；不是跨进程强一致或崩溃原子事务。
+- 短时排他创建 `trash.log.rotate` 目录协调协作进程，避免同时轮转覆盖归档；追加不持有 guard。
+  忙时最多等待约 480 ms 后降级，不抢占；崩溃可能残留 guard，需确认所有写者停止后人工移除，插件不会猜测失效。
+  其它实例旧句柄仍可继续写到已轮转文件，不因 rename 丢行但 `.1` 可能偏大；后续仍按 KEEP 淘汰。
+  轮转中失败可能保留部分改名，不危险回滚；重试仍执行相同安全门禁。
+
+### 验收标准与结果
+
+29 个日志场景（原 21 + 8）使用合成临时 home：精确 4 MiB 阈值、下一次追加轮转、三份归档与最旧淘汰、逐行核对完整 JSONL、
+归档 symlink 拒绝、轮转/新建失败不改变业务结果与重试、guard 忙降级、四实例加两个子进程并发轮转的 280 条逐行核对、旧句柄跨进程迟到写入 `.1`。
+本轮 `npm run build`、`npm test`、安装版 rc.5 Electron 的 `npm run test:discovery`、`npm pack --dry-run` 全部退出 0。Node 与 Electron 各通过 29 项日志回归（0 跳过）和 37 项文件系统回归；平台套件各 4 项通过、6 项 Windows-only 跳过。pack 含 67 个文件且无 CODEX 报告。执行证据保存在本地 `CODEX_LOGROTATE.md`；不将历史真机验收当作本轮复验。
+
+### 明确不做什么
+
+不改 DSH 核心/profile、不 install_bundle、不操作真实会话、不发布或推送；不改包身份与物理删除语义。
+不承诺跨进程强一致、硬容量上限或断电事务，不自动清理崩溃残留 guard，不扩大已验证的平台/DSH 版本边界。

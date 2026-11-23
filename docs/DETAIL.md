@@ -91,7 +91,19 @@ Host 将操作记录追加到 **`$DSH_HOME/logs/trash.log`**（UTF-8 JSONL，一
 POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并在每次打开后收紧到 0600。Windows 不承诺 POSIX mode 位等价于 ACL。
 已有 logs 目录的权限保持原样；home/logs 的 symlink、日志 symlink 与非普通文件拒绝写入。
 文件始终以 `O_APPEND` 打开，不截断；同进程所有实例共用按路径串行队列。
-**轮转未启用，大小阈值无（不限制单文件大小）**；插件不会改写或清空历史记录。
+轮转策略固定为 `src/operation-log.ts` 的 **`MAX_BYTES = 4 * 1024 * 1024`（4 MiB）、`KEEP = 3`**，不读取环境变量。
+每次追加前在同一按路径队列内检查：当前文件**严格大于** 4 MiB 时，先删除最旧的 `trash.log.3`，
+再逆序 `trash.log.2 → .3`、`.1 → .2`、`trash.log → .1`，最后新建 0600 的 `trash.log`，先写轮转记录再写业务记录。
+刚好 4 MiB 不轮转；使其超限的完整一行保留在原文件，下一次追加才触发。最多保留活动文件加三份归档，
+约 16 MiB 历史，**不是硬容量上限**：单条大记录、并发旧句柄和失败会使文件超限。
+除了 KEEP 明确淘汰的最旧一份，轮转只改名，不截断、复制或重写已有行；保留窗口内每行仍可在活动文件或 `.1`–`.3` 找到。
+
+轮转使用临时目录 `logs/trash.log.rotate` 的排他创建避免协作进程同时移动并覆盖归档，追加不持有这个 guard。
+竞争时最多等待约 480 ms 后降级 logger；不抢占 guard。进程在轮转中崩溃可能留下 guard，后续超限追加仍会重试并降级，
+需在确认所有写者均已停止后人工移除残留 guard；不自动猜测它是否失效。这不是跨进程强一致或崩溃原子轮转。
+另一个实例若已持有旧文件句柄，rename 后仍可能把完整行写进已轮转文件，**不因 rename 丢行，但 `.1` 会偏大**；
+继续轮转后文件序号还会变化，最终仍受 KEEP 淘汰。轮转中失败可留下已完成的改名，不做危险回滚。
+活动文件与所有待轮转路径均拒绝 symlink/非普通文件；归档路径会在任何改名或淘汰前全部检查。
 
 每行固定包含 `ts`（ISO）、`action`、`sessionId`、`stage`、`result`、`reason`。
 成功且无原因时 `reason: null`，清空汇总 `sessionId: null`。
@@ -102,21 +114,26 @@ POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并
 | `removeFromTrash` | purge 阶段 + 一条 `complete` 结果，包括门禁/依赖失败 |
 | `emptyTrash` | 每条会话的 purge 阶段与 `complete`，以及一条 `summary`；原因包含成功/失败数，空列表也有汇总 |
 | `recovery` | 每条待恢复凭据的阶段与 `recovery` 结果；成功 `deleted` / `unmoved`，失败 `failed` |
+| `log-rotate` | 成功 `complete/ok`；`reason` 含文件序号、保留范围、实际淘汰文件或 none 和阈值；失败按实际步骤（含序号）降级 logger |
 
 purge 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`；
 工作区 detach 每次实际尝试各记一条，不为非成员或零归属伪造 detach 行；日志行数不固定。
 失败按实际阶段记录，缓存清理失败为 `projection/warning`。
 每条追加尝试都会等待完成；rename 事件在测试 SIGKILL 前已写出。日志不是业务提交凭据，
-也没有断电级 fsync 保证。任意定位、创建、打开、追加、关闭失败均不改变主操作结果，
-只降级 `ctx.logger.info`，携带原记录与 `logError`；降级 logger 自身抛错也会吞掉，后续记录仍可重试。
+也没有断电级 fsync 保证。任意定位、轮转、创建、打开、追加、关闭失败均不改变主操作结果，
+只降级 `ctx.logger.info`，携带原记录与 `logError`；降级 logger 自身抛错也会吞掉，后续记录仍可重试。轮转失败时轮转记录与原业务记录分别降级；不把业务成功改为失败，也不替换原业务异常。磁盘失败仍不承诺每条落盘。
 Client 不展示操作日志，`listTrash` 读取/对账不额外写操作记录。
 
 将下面路径替换为 stat 反推的实际 home，即可直接查看（无需桌面 stdout）：
 
 ```sh
-tail -f '/实际的 DSH home/logs/trash.log'
-cat '/实际的 DSH home/logs/trash.log'
+tail -F '/实际的 DSH home/logs/trash.log'
+grep -h '"result":"failed"' '/实际的 DSH home/logs/trash.log' '/实际的 DSH home/logs/trash.log.'[123]
+grep -h '"action":"log-rotate"' '/实际的 DSH home/logs/trash.log' '/实际的 DSH home/logs/trash.log.'[123]
+cat '/实际的 DSH home/logs/trash.log.3' '/实际的 DSH home/logs/trash.log.2' '/实际的 DSH home/logs/trash.log.1' '/实际的 DSH home/logs/trash.log'
 ```
+
+`tail -F` 按文件名跟随轮转；归档尚未生成时，grep/cat 对不存在路径会提示错误。旧句柄迟到行可能使按文件序号拼接的结果不严格按时间排序。
 
 ## Client 入口、面板与共享投影
 
@@ -190,9 +207,11 @@ SIGKILL 回归按真实两层目录枚举规则验证重启前后残留不可发
 另有点目录正向对照、非法 intent/recovery 拒绝及无凭据暂存保留断言。trash transport 不直接修改 Client 归档集合。
 这不等同于真实 React renderer 或真实 profile GUI 验收。
 
-另外 21 个持久化日志场景在 `npm test` 和 discovery 中各运行一次：成功/失败 JSONL、权限、
+另外 29 个持久化日志场景在 `npm test` 和 discovery 中各运行一次：成功/失败 JSONL、权限、
 全部 purge 成功阶段及逐阶段失败、empty 逐条/汇总、无 source 的 recovery 成败、写入与降级 logger 同时失败、
 队列失败后重试、symlink 拒绝、无可靠 home 降级，以及跨 Host 操作/多个 logger 实例/两个子进程并发追加。
+新增 8 项使用实际 4 MiB 阈值验证边界与下一次追加轮转、KEEP 淘汰、逐行完整保留、归档 symlink 拒绝、
+轮转失败与建新文件失败不改变业务结果及重试、guard 忙时降级、两个子进程加四实例并发轮转逐行核对，以及跨进程旧句柄迟到写入 `.1`。
 全部 37 个文件系统场景也逐条核对 Host report 已落盘，SIGKILL 回归额外核对 `renamed` 记录仍在磁盘。
 
 公开包身份为 `d-trash@0.1.0`，MIT，目标仓库 `HLhhh/d-trash`；版本不对应期号。locale 的 `meta.detail` 指向此文档，packed 文件包含 PLAN、
@@ -249,7 +268,7 @@ if ($LASTEXITCODE -ne 0) { throw 'pack failed' }
 ```
 
 预期 build 输出 Typert / Client generated/bundled；npm test 输出平台 10 passed/0 skipped、phase4 27 passed/10 skipped、
-日志 19 passed/2 skipped（每个 SKIP 带 POSIX 原因），其余 Host/Client/生成器通过，退出码 0。
+日志 26 passed/3 skipped（每个 SKIP 带 POSIX 原因），其余 Host/Client/生成器通过，退出码 0。
 无安装版变量时 discovery 明确输出 SKIP，不算 discovery 通过。若已安装 DSH，可仅设置以下两个路径再运行；
 runner 负责 ELECTRON_RUN_AS_NODE、等待 GUI 子系统 Electron 退出和转发输出，无需修改 profile：
 

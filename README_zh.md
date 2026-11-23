@@ -83,19 +83,23 @@ peer 区间允许兼容更新，不代表后续 DSH 版本已验收。升级后�
 - 不承诺安全擦除；搜索结果依赖 DSH 既有同步收敛，不保证立即消失；投影缓存清理失败只记 warning。
 - 回收站会话仍属于归档集合，原生「显示已归档 / 全部对话」视图仍可显示。
 - 操作不是跨服务或跨进程事务。凭据支持进程崩溃后恢复，不保证断电级目录 `fsync`；无凭据的陌生暂存目录保留。
-- 审计日志为 best effort，无轮转、大小阈值和保留策略；缺少日志不能证明操作没有发生。
+- 审计日志为 best effort：超过 4 MiB 后在下一次追加前轮转，保留三份归档（`trash.log.1`–`.3`），约 16 MiB 历史但可能超限；缺少日志不能证明操作没有发生。
 
 ## 审计日志
 
 路径为 **`<home>/logs/trash.log`**，通常是 **`~/.dsh/logs/trash.log`**。Host 从 persistence stat/source 路径反推并校验 home，不读取 `DSH_HOME` 环境变量；自定义 home 时，下列命令应使用对应路径。
 
-每行 JSONL 固定包含 **`ts`**、**`action`**、**`sessionId`**、**`stage`**、**`result`**、**`reason`**。`ts` 为 ISO 时间；无原因时 `reason: null`，清空汇总使用 `sessionId: null`。action 包括 `trashSession`、`restoreSession`、`removeFromTrash`、`emptyTrash` 和 `recovery`。
+每行 JSONL 固定包含 **`ts`**、**`action`**、**`sessionId`**、**`stage`**、**`result`**、**`reason`**。`ts` 为 ISO 时间；无原因时 `reason: null`，清空汇总使用 `sessionId: null`。action 包括 `trashSession`、`restoreSession`、`removeFromTrash`、`emptyTrash`、`recovery` 和 `log-rotate`。
 
 ```sh
-tail -f ~/.dsh/logs/trash.log
-grep '"result":"failed"' ~/.dsh/logs/trash.log
-grep '"action":"recovery"' ~/.dsh/logs/trash.log
+tail -F ~/.dsh/logs/trash.log
+grep -h '"result":"failed"' ~/.dsh/logs/trash.log ~/.dsh/logs/trash.log.[123]
+grep -h '"action":"recovery"' ~/.dsh/logs/trash.log ~/.dsh/logs/trash.log.[123]
 ```
+
+固定常量为 `MAX_BYTES = 4 * 1024 * 1024`、`KEEP = 3`，不读取环境配置。轮转在同进程共享的按路径队列内完成，删除 `.3` 后逆序移动归档，新建 0600 活动文件（POSIX），并以 `log-rotate` 记录序号及结果。仅按策略淘汰最旧一份，其余行只改名保留，不截断。
+
+这不是跨进程强一致：其它实例已持有的旧句柄可继续将完整行写入轮转文件，使 `.1` 偏大。短时 `trash.log.rotate` 目录协调协作进程的轮转；guard 忙或崩溃残留时有界等待后降级 logger，不自动抢占。恢复与并发边界见 [DETAIL.md](./docs/DETAIL.md)。归档尚未生成时，glob 命令可能提示文件不存在。
 
 日志失败降级到 Host logger，不改变主操作结果。该文件用于诊断，不是物理删除的业务凭据存储。
 

@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict'
-import { lstat, mkdir, open, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { acquireWriteLease } from '../dist/write-lease.js'
-import { OperationLog } from '../dist/operation-log.js'
+import { MAX_BYTES, KEEP, OperationLog } from '../dist/operation-log.js'
 import { fixture } from './phase4-fixture.mjs'
 
 const path = f => join(f.home, 'logs', 'trash.log')
-const rows = async f => {
-  const text = await readFile(path(f), 'utf8')
+const rowsAt = async file => {
+  const text = await readFile(file, 'utf8')
   assert.ok(text.endsWith('\n'))
   return text.trimEnd().split('\n').map(line => {
     const row = JSON.parse(line)
@@ -21,6 +21,28 @@ const rows = async f => {
     return row
   })
 }
+const rows = f => rowsAt(path(f))
+const allRows = async f => (await Promise.all(Array.from({ length: KEEP + 1 }, (_, i) =>
+  rowsAt(path(f) + (i ? `.${i}` : '')).catch(error => {
+    if (error.code === 'ENOENT') return []
+    throw error
+  })))).flat()
+// Real production threshold, complete short JSONL records, no sparse filler or
+// test-only policy override. Exact serialized rows are used for preservation QA.
+const fill = async (f, tag, bytes = MAX_BYTES + 1, append = false) => {
+  const record = { ts: '2026-11-23T00:00:00.000Z', action: 'trashSession', sessionId: tag,
+    stage: 'seed', result: 'ok', reason: tag + ':' + '字'.repeat(1000) }
+  const line = JSON.stringify(record) + '\n'
+  const content = line.repeat(Math.ceil(bytes / Buffer.byteLength(line)))
+  await writeFile(path(f), content, { mode: 0o600, flag: append ? 'a' : 'w' })
+  return content.trimEnd().split('\n')
+}
+const diskLines = async f => (await Promise.all(Array.from({ length: KEEP + 1 }, async (_, i) =>
+  (await readFile(path(f) + (i ? `.${i}` : ''), 'utf8').catch(error => {
+    if (error.code === 'ENOENT') return ''
+    throw error
+  })).split('\n').filter(Boolean)))).flat()
+const assertLines = (actual, expected) => assert.deepEqual([...actual].sort(), [...expected].sort())
 let count = 0, skipped = 0
 async function test(name, run) {
   if (process.platform === 'win32' && /0700|symlink/.test(name)) {
@@ -233,6 +255,189 @@ await test('concurrent Host operations, logger instances and processes append wi
   const log = await rows(f)
   assert.equal(log.length, 24 + 160 + 120)
   assert.equal(new Set(log.filter(row => row.stage === 'concurrent').map(row => row.reason)).size, 280)
+})
+
+
+await test('MAX_BYTES boundary rotates on next append with complete rows and 0600 active file', async f => {
+  assert.equal(MAX_BYTES, 4 * 1024 * 1024)
+  assert.equal(KEEP, 3)
+  await f.create()
+  // Exactly at the limit does not rotate. The next small record crosses it.
+  const base = { ts: '2026-11-23T00:00:00.000Z', action: 'trashSession', sessionId: 'boundary',
+    stage: 'seed', result: 'ok', reason: '' }
+  const overhead = Buffer.byteLength(JSON.stringify(base) + '\n')
+  base.reason = 'x'.repeat(MAX_BYTES - overhead)
+  const exact = JSON.stringify(base)
+  await writeFile(path(f), exact + '\n')
+  await f.trash.restoreSession('a')
+  await assert.rejects(lstat(path(f) + '.1'), { code: 'ENOENT' })
+  const before = await diskLines(f)
+  await f.trash.trashSession('a')
+  const log = await allRows(f)
+  const rotate = log.find(row => row.action === 'log-rotate')
+  assert.deepEqual([rotate.stage, rotate.result, rotate.sessionId], ['complete', 'ok', null])
+  assert.match(rotate.reason, /archives=1\.\.3/)
+  assert.match(rotate.reason, /trash.log -> trash.log.1/)
+  assert.equal(f.fallbacks.length, 0)
+  assertLines(await diskLines(f), [...before, ...((await readFile(path(f), 'utf8')).trimEnd().split('\n'))])
+  assert.equal(log.filter(row => row.action === 'trashSession' && row.stage === 'complete').length, 1)
+  if (process.platform !== 'win32') assert.equal((await lstat(path(f))).mode & 0o777, 0o600)
+})
+
+await test('KEEP retains three archives and evicts exactly the oldest generation', async f => {
+  await f.create()
+  const log = new OperationLog(async () => f.home, line => assert.fail(line))
+  const generations = []
+  for (let i = 0; i < KEEP + 1; i++) {
+    const prior = (await readFile(path(f), 'utf8')).trimEnd().split('\n')
+    generations.push([...prior, ...await fill(f, `generation:${i}`, MAX_BYTES + 1, true)])
+    await log.write('trashSession', 'synthetic', 'retention', 'ok', `trigger:${i}`)
+    const active = await rows(f)
+    assert.equal(active[0].action, 'log-rotate')
+    assert.equal(active[1].reason, `trigger:${i}`)
+    // At each step every retained seed line is byte-for-byte intact.
+    for (let n = 1; n <= Math.min(i + 1, KEEP); n++) {
+      const archive = path(f) + `.${n}`
+      await rowsAt(archive)
+      assertLines((await readFile(archive, 'utf8')).trimEnd().split('\n'), generations[i - n + 1])
+    }
+  }
+  await assert.rejects(lstat(path(f) + `.${KEEP + 1}`), { code: 'ENOENT' })
+  const retained = await allRows(f)
+  assert.ok(!retained.some(row => row.sessionId === 'generation:0'))
+  for (let i = 1; i <= KEEP; i++) assert.ok(retained.some(row => row.sessionId === `generation:${i}`))
+})
+
+await test('symlink archive is refused before any rotation mutation and retry succeeds', async f => {
+  await f.create()
+  const seed = await fill(f, 'protected')
+  const outside = join(f.home, 'unrelated')
+  await writeFile(outside, 'SYNTHETIC untouched')
+  await symlink(outside, path(f) + '.2')
+  await f.trash.restoreSession('a')
+  assert.equal(f.medium.has('a'), false)
+  assert.equal(await readFile(outside, 'utf8'), 'SYNTHETIC untouched')
+  await rm(path(f) + '.2')
+  assertLines(await diskLines(f), seed)
+  assert.ok(f.fallbacks.some(row => row.action === 'log-rotate' && row.stage === 'validate'))
+  assert.ok(f.fallbacks.some(row => row.action === 'restoreSession' && row.result === 'ok'))
+  await f.trash.trashSession('a')
+  assert.equal((await rows(f))[0].action, 'log-rotate')
+  assertLines((await readFile(path(f) + '.1', 'utf8')).trimEnd().split('\n'), seed)
+})
+
+await test('rotation failure leaves business success/original rejection intact and next call retries', async f => {
+  await f.create()
+  const seed = await fill(f, 'before-failure')
+  await mkdir(path(f) + '.3')
+  f.hooks.fallback = () => { throw new Error('fallback failed too') }
+  await f.trash.restoreSession('a')
+  const original = new Error('archive primary failure')
+  f.hooks.archive = () => { throw original }
+  await assert.rejects(f.trash.trashSession('a'), error => error === original)
+  assertLines((await readFile(path(f), 'utf8')).trimEnd().split('\n'), seed)
+  assert.equal(f.medium.has('a'), false)
+  assert.ok(f.fallbacks.some(row => row.action === 'log-rotate' && row.result === 'failed'))
+  assert.ok(f.fallbacks.some(row => row.action === 'trashSession' && row.reason.includes('archive primary failure')))
+  delete f.hooks.archive
+  await rm(path(f) + '.3', { recursive: true })
+  await f.trash.trashSession('a')
+  assertLines((await readFile(path(f) + '.1', 'utf8')).trimEnd().split('\n'), seed)
+  assert.equal((await rows(f)).at(-1).result, 'ok')
+})
+
+await test('new active file failure after rename falls back and recovers without losing archive lines', async f => {
+  await f.create()
+  const seed = await fill(f, 'create-failure')
+  const log = f.trash.operationLog
+  const append = log.append.bind(log)
+  log.append = async (file, record) => {
+    if (record.action === 'log-rotate') await mkdir(file) // deterministic creation obstruction after rename
+    await append(file, record)
+  }
+  await f.trash.restoreSession('a')
+  assert.equal(f.medium.has('a'), false)
+  assertLines((await readFile(path(f) + '.1', 'utf8')).trimEnd().split('\n'), seed)
+  assert.ok(f.fallbacks.some(row => row.action === 'log-rotate' && row.stage === 'create:0'))
+  assert.ok(f.fallbacks.some(row => row.action === 'restoreSession' && row.result === 'ok'))
+  log.append = append
+  await rm(path(f), { recursive: true })
+  await f.trash.trashSession('a')
+  assert.equal((await rows(f)).at(-1).result, 'ok')
+  assertLines((await readFile(path(f) + '.1', 'utf8')).trimEnd().split('\n'), seed)
+})
+
+await test('busy rotation guard degrades conservatively and retry resumes after release', async f => {
+  await f.create()
+  const seed = await fill(f, 'busy')
+  await mkdir(path(f) + '.rotate')
+  await f.trash.restoreSession('a')
+  assert.ok(f.fallbacks.some(row => row.action === 'log-rotate' && row.stage === 'guard'))
+  assertLines((await readFile(path(f), 'utf8')).trimEnd().split('\n'), seed)
+  await rm(path(f) + '.rotate', { recursive: true })
+  await f.trash.trashSession('a')
+  assert.equal((await rows(f))[0].action, 'log-rotate')
+})
+
+await test('concurrent processes and instances rotating preserve every retained whole JSONL line', async f => {
+  await f.create()
+  const seed = await fill(f, 'concurrent-rotate')
+  const fallbacks = []
+  const writers = Array.from({ length: 4 }, () => new OperationLog(async () => f.home, line => fallbacks.push(line)))
+  // Large whole records force multiple rotations with all test lines still
+  // inside KEEP. Each child starts its own OperationLog and process-local queue.
+  const childSource = String.raw`
+    import { OperationLog } from ${JSON.stringify(new URL('../dist/operation-log.js', import.meta.url).href)};
+    const log = new OperationLog(async () => process.argv[1], line => { console.error(line); process.exitCode = 1 });
+    await Promise.all(Array.from({length: 60}, (_, i) => log.write('trashSession', 'synthetic', 'rotate-concurrent', 'ok',
+      'child:' + process.argv[2] + ':' + i + ':' + '字'.repeat(8000))));
+  `
+  const children = [0, 1].map(index => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', childSource, f.home, String(index)],
+      { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk })
+    return once(child, 'exit').then(([code]) => assert.equal(code, 0, stderr))
+  })
+  const expected = Array.from({ length: 160 }, (_, i) => `parent:${i}:` + '字'.repeat(8000))
+  for (let c = 0; c < 2; c++) for (let i = 0; i < 60; i++) expected.push(`child:${c}:${i}:` + '字'.repeat(8000))
+  await Promise.all([...children, ...expected.slice(0, 160).map((reason, i) =>
+    writers[i % writers.length].write('trashSession', 'synthetic', 'rotate-concurrent', 'ok', reason))])
+  assert.deepEqual(fallbacks, [])
+  const log = await allRows(f) // parses EVERY line, including seed/rotation records
+  const rotations = log.filter(row => row.action === 'log-rotate')
+  assert.ok(rotations.length >= 2 && rotations.length <= KEEP)
+  assertLines(log.filter(row => row.stage === 'rotate-concurrent').map(row => row.reason), expected)
+  assertLines((await diskLines(f)).filter(line => JSON.parse(line).stage === 'seed'), seed)
+  assert.equal(log.length, seed.length + expected.length + rotations.length)
+})
+
+await test('another process holding an old descriptor writes complete late lines into archive .1', async f => {
+  await f.create()
+  const seed = await fill(f, 'old-handle')
+  const late = JSON.stringify({ ts: '2026-11-23T00:00:00.000Z', action: 'trashSession', sessionId: 'synthetic',
+    stage: 'old-handle', result: 'ok', reason: 'late old descriptor write' })
+  const childSource = String.raw`
+    import { open } from 'node:fs/promises';
+    import { once } from 'node:events';
+    const handle = await open(process.argv[1], 'a');
+    const go = once(process.stdin, 'data'); process.stdout.write('READY'); await go;
+    await handle.write(Buffer.from(process.argv[2] + '\n')); await handle.close();
+  `
+  const child = spawn(process.execPath, ['--input-type=module', '-e', childSource, path(f), late],
+    { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] })
+  let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk })
+  const finished = once(child, 'exit')
+  try {
+    await once(child.stdout, 'data')
+    await f.trash.restoreSession('a')
+    child.stdin.end('GO')
+    const [code] = await finished
+    assert.equal(code, 0, stderr)
+    await allRows(f)
+    assertLines((await readFile(path(f) + '.1', 'utf8')).trimEnd().split('\n'), [...seed, late])
+    assert.ok((await lstat(path(f) + '.1')).size > MAX_BYTES)
+    assert.equal(f.fallbacks.length, 0)
+  } finally { child.kill() }
 })
 
 console.log(`PASS: operation-log ${count} isolated persistent JSONL scenarios; ${skipped} explicitly skipped; no real sessions`)

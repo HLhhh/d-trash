@@ -83,19 +83,23 @@ Peer ranges allow compatible updates; they do not mean later DSH versions have b
 - Deletion is not secure erasure. Search results may take time to converge through DSH's existing synchronization; cache cleanup failures are warnings.
 - Trash sessions remain archived, so native views configured to show archived/all sessions can still display them.
 - Operations are not a cross-service or cross-process transaction. Crash recovery uses durable receipts; power-loss-safe directory `fsync` is not guaranteed. Unknown staging directories without receipts are left alone.
-- Audit logging is best effort, with no rotation, size limit, or retention policy. Missing records do not prove an operation did not happen.
+- Audit logging is best effort: rotate before the next append after exceeding 4 MiB, keeping three archives (`trash.log.1`–`.3`). About 16 MiB of history is retained, with possible overshoot; missing records do not prove an operation did not happen.
 
 ## Audit log
 
 The log is **`<home>/logs/trash.log`**, normally **`~/.dsh/logs/trash.log`**. The Host derives and validates `home` from the persistence stat/source path, not from the `DSH_HOME` environment variable. For a custom home, use that home in the commands below.
 
-Each JSONL line contains **`ts`**, **`action`**, **`sessionId`**, **`stage`**, **`result`**, and **`reason`**. `ts` is ISO time; `reason` is `null` when there is no reason, and empty-trash summaries use `sessionId: null`. Actions include `trashSession`, `restoreSession`, `removeFromTrash`, `emptyTrash`, and `recovery`.
+Each JSONL line contains **`ts`**, **`action`**, **`sessionId`**, **`stage`**, **`result`**, and **`reason`**. `ts` is ISO time; `reason` is `null` when there is no reason, and empty-trash summaries use `sessionId: null`. Actions include `trashSession`, `restoreSession`, `removeFromTrash`, `emptyTrash`, `recovery`, and `log-rotate`.
 
 ```sh
-tail -f ~/.dsh/logs/trash.log
-grep '"result":"failed"' ~/.dsh/logs/trash.log
-grep '"action":"recovery"' ~/.dsh/logs/trash.log
+tail -F ~/.dsh/logs/trash.log
+grep -h '"result":"failed"' ~/.dsh/logs/trash.log ~/.dsh/logs/trash.log.[123]
+grep -h '"action":"recovery"' ~/.dsh/logs/trash.log ~/.dsh/logs/trash.log.[123]
 ```
+
+The fixed constants are `MAX_BYTES = 4 * 1024 * 1024` and `KEEP = 3`; no environment configuration is needed. Rotation runs inside the process's shared per-path queue, removes `.3`, shifts archives in reverse order, and creates a 0600 active file (POSIX). A `log-rotate` record describes the file numbers and result. Only the oldest retained generation is intentionally discarded; retained lines are moved without truncation.
+
+This is not cross-process strong consistency: another instance holding an old handle may continue writing complete lines into the rotated file, making `.1` larger. A short-lived `trash.log.rotate` directory coordinates cooperating rotators; a busy or crash-left guard causes bounded waiting and logger fallback, without automatic takeover. See [DETAIL.md](./docs/DETAIL.md) for recovery and concurrency boundaries. Archive globs may report missing files before the first rotations.
 
 Log failures fall back to the Host logger and do not change the operation's result. This file is diagnostic evidence, not the deletion receipt store.
 

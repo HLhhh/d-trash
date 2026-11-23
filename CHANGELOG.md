@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Size-based audit rotation with fixed 4 MiB / three-archive retention, rotation records, safe file validation, and best-effort logger fallback. Added threshold, eviction, exact-line retention, failure/retry, concurrent rotation, and late old-handle regressions.
 - Windows write exclusion compatible with JSONL's named kernel semaphore via Koffi 3.1.1, without requiring `session.lock`.
 - Bounded Windows sharing-violation retries with identity/archive checks and durable retry receipts; explicit platform test skips and cross-platform discovery launcher.
 - Packed rc.2/rc.5 API and isolated build/test compatibility matrix, official-lease interoperability probes, and Windows self-check instructions.
