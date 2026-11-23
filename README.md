@@ -81,6 +81,7 @@ Peer ranges allow compatible updates; they do not mean later DSH versions have b
 
 ## Known limitations
 
+- Loaded/entered sessions are refused deletion while DSH holds the official write lease. There is no public unload/close API for the plugin to release it. Switch to another session or restart DSH, then retry; switching may leave the loaded session locked, in which case restart DSH. The Client shows this advice in English/Chinese and retains the underlying error. Lock contention never authorizes deletion without a lease.
 - Attachments, workspace files, Git worktrees, artifacts, server logs, backups, and other plugins' snapshots remain.
 - Deletion is not secure erasure. Search results may take time to converge through DSH's existing synchronization; cache cleanup failures are warnings.
 - Trash sessions remain archived, so native views configured to show archived/all sessions can still display them.

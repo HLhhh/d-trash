@@ -152,6 +152,7 @@ d-trash/
 6. **派生数据**：投影删除失败为 warning，marker 可能已清掉，后续 purge 不保证自动重试缓存；索引依赖下一次稳定搜索观测的已有同步，不保证即时消失，不手改 SQLite。不额外清理其它插件快照。
 7. **日志**：best effort、固定 4 MiB 阈值与三份归档（下一次追加前轮转，约 16 MiB，非硬上限）；无可靠 stat/source 或磁盘失败时降级 logger，不能当业务凭据或承诺每条必落盘。
 8. **原生重建**：写租约只证明当前写者排他（POSIX inode / Windows 同名信号量），不能禁止 rename 后原生重建 source；恢复/记录清理发现替代 source 会拒绝，不承诺跨进程维护事务。成员检查同样不锁住原生归属变动。
+9. **已加载会话**：已加载/已 enter 的会话因 DSH 占用官方写租约而拒绝删除；官方无供插件使用的公开卸载/close API。请切换离开到其它会话或重启 DSH 后再试；切换可能仍保留加载和租约，若仍占用请重启。绝不因锁占用而盲删或释放其它服务的句柄。
 
 ### 验收标准与结果
 
@@ -267,6 +268,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 | recovery | 每个凭据的阶段与 recovery 结果（deleted/unmoved/failed） |
 
 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`，幽灵记录独立使用 `logs-absent/ok` 并注明 stat undefined、日志已不存在、只清记录；detach 按实际尝试的所属工作区记，零归属不产生 detach 行。阶段失败按实际位置记录，projection 为 warning；已有字段与路径不变，日志行数不固定。
+`unlocked/ok` 仅在已取得租约且 release 成功后写入；取锁失败无 locked/unlocked，lock-busy 顺序为 gate/ok → lock/failed → complete/failed。
 
 操作前预定位并缓存 home；source 移走后复用已打开 marker 的 source；否则用目标 stat、其它 marker 或 persistence.list 候选再 stat。无可靠凭据/stat 时降级 logger，不猜路径。新目录 0700，日志文件 0600 且每次打开收紧，现有 logs 目录权限不改；拒绝 home/logs symlink、文件 symlink/非普通文件；O_APPEND、不截断，同进程按路径共享串行队列。每条等待追加完成，失败降级 ctx.logger.info（带原记录及 logError）；降级也失败则吞掉，后续可重试，不改变主操作结果。固定常量 MAX_BYTES=4 MiB、KEEP=3，超过阈值后在下一次追加前删除 .3、逆序改名并新建 0600 活动文件；轮转自身写 log-rotate 记录，失败只降级 logger，原业务结果不变。跨进程旧句柄可继续写轮转文件使 .1 偏大，不承诺跨进程强一致或 fsync，日志不充当业务提交凭据。详见下方日志轮转交付章节。
 
@@ -438,3 +440,25 @@ Windows 自检命令和预期通过/跳过数见 docs/DETAIL.md 的 Windows self
 ### 明确不做什么
 
 不改 DSH 核心/profile、不 install_bundle、不碰真实会话、不发布或推送；不改包身份、物理删除语义或保留范围，不扩大平台/DSH 验收边界。本轮为合成临时 home 回归，不声称真机 GUI 复验；Windows 原生验收仍待用户代跑。
+
+## 已加载会话的 lock-busy 提示与审计 — 已交付（2026-11-23）
+
+### 目标与范围
+
+用户真机调查确认 DSH 以写句柄持有已加载/已 enter 会话的 `session.lock`，官方无公开卸载 API；拒绝删除属于正确的平台约束。
+本次只补可操作的双语提示、稳定错误标记与租约审计条件，更新已知限制、测试和 dist；包身份与删除门禁不变。
+
+### 做法
+
+- Host 的 lock-busy `PurgeError.code` 固定为 `D_TRASH_SESSION_LOCK_BUSY`，消息精确以 `[D_TRASH_SESSION_LOCK_BUSY] ` 开头，保留原阶段、id、原因及 cause。清空遇到此类失败时，汇总也带相同前缀，成功/失败数与逐项错误不丢失。
+- Client 仅对删除/清空的此前缀加 locale 中的中英建议：先切换离开到其它会话或重启 DSH 后再试；切换可能仍保留加载/租约，若仍失败请重启。完整底层错误继续显示，不模糊匹配 lock/busy；跨 JS realm 的异常读取字符串 message。
+- `unlocked/ok` 显式以已取得租约且 release 成功为条件；取锁失败不写 locked/unlocked。当前工作区原实现已将 finally 放在取得租约后，本次把条件显式化并加落盘回归，不能据此认定真机旧日志来自当前源码。正常路径顺序不变。
+
+### 验收标准与结果
+
+`npm run build`、`npm test`、安装版 rc.5 Electron 的 `npm run test:discovery` 退出 0。Client 覆盖删除/清空、RemoteResult/跨 realm 抛错、即时切换中英文、保留细节/重试和三类非精确标记拒绝识别；真实租约测试覆盖单条/部分清空标记、cause、数据不变、失败无 unlocked 及成功完整顺序。
+Node 与 Electron 各通过 30 项日志场景（原 29 + 1，0 跳过）、37 项文件系统与 18 项幽灵记录；平台各 4 项通过、6 项 Windows-only 明确跳过。`npm pack --dry-run` 打包检查结果与命令证据见本地 `CODEX_BUSY.md`，该文件不随包分发。
+
+### 明确不做什么
+
+绝不因锁占用而盲删、unlink 锁文件、强制夺锁或调用私有卸载接口；不改变原生加载/归档行为，不改核心/profile、不 install_bundle、不操作真实会话、不发布或推送。本轮为合成临时 home 回归，用户的真机调查和既有验收单独保留，不声称本轮完成真机复验；Windows 原生仍待用户代跑。

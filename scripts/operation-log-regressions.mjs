@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { acquireWriteLease } from '../dist/write-lease.js'
+import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX } from '../dist/types.js'
 import { MAX_BYTES, KEEP, OperationLog } from '../dist/operation-log.js'
 import { fixture } from './phase4-fixture.mjs'
 
@@ -138,8 +139,51 @@ for (const stage of ['gate', 'lock', 'recheck', 'intent', 'rename', 'delete-stag
     assert.ok(failure)
     assert.ok(failure.reason.length > 0)
     assert.equal(log.at(-1).result, stage === 'projection' ? 'ok' : 'failed')
+    if (stage === 'gate' || stage === 'lock') {
+      const purge = log.filter(row => row.action === 'removeFromTrash')
+      assert.ok(!purge.some(row => row.stage === 'locked' || row.stage === 'unlocked'),
+        'a failed lease acquisition must never claim ownership or unlock')
+      if (stage === 'lock') {
+        assert.deepEqual(purge.map(row => [row.stage, row.result]), [['gate', 'ok'], ['lock', 'failed'], ['complete', 'failed']])
+        assert.ok(failure.reason.startsWith(`Error: ${SESSION_LOCK_BUSY_PREFIX}`))
+      }
+    } else {
+      assert.equal(log.filter(row => row.stage === 'unlocked').length, 1, 'an acquired lease is released once on later failure')
+    }
   })
 }
+
+await test('busy delete and empty preserve stable wire marker, cause and data; neither logs an unlock', async f => {
+  await f.create('a'); await f.create('b')
+  const lock = await acquireWriteLease(f.directory('a'))
+  try {
+    await assert.rejects(f.trash.removeFromTrash('a'), error => {
+      assert.equal(error.code, TrashErrorCode.SessionLockBusy)
+      assert.ok(error.message.startsWith(SESSION_LOCK_BUSY_PREFIX))
+      assert.match(error.message, /Physical deletion \[lock\] \(a\): Session lock is busy/)
+      assert.equal(error.cause.cause.code, 'EBUSY')
+      return true
+    })
+    await assert.rejects(f.trash.emptyTrash(), error => {
+      assert.ok(error.message.startsWith(SESSION_LOCK_BUSY_PREFIX))
+      assert.match(error.message, /1 deleted, 1 failed/)
+      assert.equal(error.errors[0].code, TrashErrorCode.SessionLockBusy)
+      return true
+    })
+    assert.equal(await readFile(f.log('a'), 'utf8'), 'SYNTHETIC TEST LOG ONLY\n')
+    assert.equal(f.medium.has('a'), true)
+    assert.equal(f.medium.get('a').purge, undefined)
+    assert.equal(f.archived.has('a'), true)
+    assert.equal(f.members.has('a'), true)
+    assert.equal(f.medium.has('b'), false)
+    const log = await rows(f)
+    assert.ok(!log.some(row => row.sessionId === 'a' && (row.stage === 'locked' || row.stage === 'unlocked')))
+    assert.deepEqual(log.filter(row => row.action === 'emptyTrash' && row.sessionId === 'b').map(row => row.stage),
+      ['gate', 'locked', 'recheck', 'intent', 'renamed', 'unlocked', 'logs-deleted', 'delete-staged',
+        'detach', 'unarchive', 'marker', 'projection', 'complete'])
+  } finally { await lock.release() }
+  assert.equal(await f.trash.removeFromTrash('a'), true)
+})
 
 await test('empty writes every item and partial-failure/success/zero summaries', async f => {
   await f.create('a'); await f.create('b')

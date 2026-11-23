@@ -18,6 +18,7 @@ export declare const copy: {
         restoreFailed: string;
         deleteFailed: string;
         emptyFailed: string;
+        sessionLockBusy: string;
         working: string;
         trashedAt: string;
         workspace: string;
@@ -44,6 +45,7 @@ export declare const copy: {
         restoreFailed: string;
         deleteFailed: string;
         emptyFailed: string;
+        sessionLockBusy: string;
         working: string;
         trashedAt: string;
         workspace: string;

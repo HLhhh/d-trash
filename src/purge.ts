@@ -2,7 +2,8 @@ import type { BigIntStats } from 'node:fs'
 import { lstat, mkdir, rename, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { acquireWriteLease } from './write-lease.js'
+import { acquireWriteLease, type WriteLease } from './write-lease.js'
+import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX } from './types.js'
 import { retrySharing, isCanonicalPath } from './fs-retry.js'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
@@ -35,8 +36,9 @@ interface StagedDeletion {
 }
 
 export class PurgeError extends Error {
-  constructor(readonly sessionId: SessionId, readonly stage: string, cause: unknown) {
-    super(`Physical deletion [${stage}] (${sessionId}): ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+  constructor(readonly sessionId: SessionId, readonly stage: string, cause: unknown,
+    readonly code?: TrashErrorCode) {
+    super(`${code === TrashErrorCode.SessionLockBusy ? SESSION_LOCK_BUSY_PREFIX : ''}Physical deletion [${stage}] (${sessionId}): ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
   }
 }
 
@@ -109,8 +111,9 @@ export class SessionPurger {
       }
       await this.report(id, 'gate')
       stage = 'lock'
-      const lease = await acquireWriteLease(before.source)
+      let acquired: WriteLease | undefined
       try {
+        const lease = acquired = await acquireWriteLease(before.source)
         await this.report(id, 'locked')
         stage = 'recheck'
         await lease.verify()
@@ -151,13 +154,16 @@ export class SessionPurger {
       } finally {
         // POSIX closes the inode moved by rename; Windows releases the original
         // path-named semaphore. Neither branch unlinks a held lock.
-        await lease.release()
-        await this.report(id, 'unlocked')
+        if (acquired) {
+          await acquired.release()
+          await this.report(id, 'unlocked')
+        }
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException)?.code
       if (stage === 'lock' && (code === 'EBUSY' || code === 'EAGAIN' || code === 'EWOULDBLOCK')) {
-        throw new PurgeError(id, 'lock', new Error('Session lock is busy; session may be open or writing', { cause: error }))
+        throw new PurgeError(id, 'lock', new Error('Session lock is busy; session may be open or writing', { cause: error }),
+          TrashErrorCode.SessionLockBusy)
       }
       throw new PurgeError(id, stage, error)
     }

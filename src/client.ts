@@ -1,5 +1,5 @@
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
-import type { TrashRecord } from './types.js'
+import { SESSION_LOCK_BUSY_PREFIX, type TrashRecord } from './types.js'
 import { copy, type CopyKey } from './client-copy.js'
 import { trashStore, type TrashEntries } from './client-store.js'
 import { WorkspaceSync, type WorkspaceProjection, type WorkspaceReader } from './workspace-sync.js'
@@ -21,6 +21,10 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
   }
 
   type Translate = (key: CopyKey, values?: Record<string, string>) => string
+  // Remote/transport errors may come from another JS realm.
+  const errorMessage = (reason: unknown): string =>
+    reason !== null && typeof reason === 'object' && 'message' in reason && typeof reason.message === 'string'
+      ? reason.message : String(reason)
   interface RowProps {
     sessionId: SessionId
     t: Translate
@@ -238,7 +242,7 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
             await reload()
           } catch (reason: unknown) {
             if (mounted.current) setFailure({ key: failureKey,
-              reason: reason instanceof Error ? reason.message : String(reason) })
+              reason: errorMessage(reason) })
           } finally {
             busy.current = false
             if (mounted.current) setPending(false)
@@ -254,7 +258,7 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
           void trashStore.refresh(async () => unwrap(await trash.listTrash()),
             () => mounted.current && request.current === token).catch((reason: unknown) => {
             if (mounted.current && request.current === token) setFailure({ key: 'loadFailed',
-              reason: reason instanceof Error ? reason.message : String(reason) })
+              reason: errorMessage(reason) })
           }).finally(() => {
             if (mounted.current && request.current === token) setPending(false)
           })
@@ -268,7 +272,10 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
                 h('button', { type: 'button', className: 'trash-danger', disabled: pending || !entries?.length,
                   onClick: () => setConfirmation({ kind: 'empty' }) }, t('emptyTrash')))),
             h('p', { className: 'trash-panel-note' }, t('physicalDeletion')),
-            failure && h('div', { className: 'trash-error', role: 'alert' }, t(failure.key, { reason: failure.reason })),
+            failure && h('div', { className: 'trash-error', role: 'alert' },
+              (failure.key === 'deleteFailed' || failure.key === 'emptyFailed')
+                && failure.reason.startsWith(SESSION_LOCK_BUSY_PREFIX) && h('p', null, t('sessionLockBusy')),
+              t(failure.key, { reason: failure.reason })),
             pending && h('p', { role: 'status' }, t(entries === null ? 'loading' : 'working')),
             confirmation?.kind === 'empty' && h('div', { className: 'trash-panel-confirm', role: 'group',
               'aria-label': t('confirmEmpty'), onKeyDown: (event: KeyboardEvent) => {

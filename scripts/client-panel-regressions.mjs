@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { PurgeError } from '../dist/purge.js'
+import { SESSION_LOCK_BUSY_PREFIX, TrashErrorCode } from '../dist/types.js'
+import { copy } from '../dist/client-copy.js'
 
 export async function runPanelRegressions({ entries, mount, find, tick, records, archived,
   panelCalls, panelFailures, setLanguage, clientArchived, clientArchiveCalls, clientArchiveControl, hostRemote }) {
@@ -334,7 +337,54 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
     }
   }
 
+  // Only the exact Host wire prefix enables advice, in both result and
+  // transport failure paths. Human text and unrelated markers must not match.
+  const lockError = new PurgeError('busy-session', 'lock',
+    new Error('Session lock is busy; session may be open or writing'), TrashErrorCode.SessionLockBusy)
+  for (const [method, label] of [['removeFromTrash', 'Delete forever'], ['emptyTrash', 'Empty trash']]) {
+    const original = hostRemote[method]
+    const message = method === 'emptyTrash'
+      ? `${SESSION_LOCK_BUSY_PREFIX}Physical deletion: 1 deleted, 1 failed: ${lockError.message}` : lockError.message
+    for (const transport of [false, true]) {
+      records.clear(); seed('busy-session', { titleSnapshot: 'Busy session' })
+      hostRemote[method] = async () => {
+        if (transport) throw new Error(message)
+        // No custom code property survives the wire.
+        return { ok: false, error: { message } }
+      }
+      view = setup(); view.render(); await tick()
+      button(view.render(), label).props.onClick()
+      button(group(view.render()), label).props.onClick(); await tick()
+      for (const language of ['en', 'zh']) {
+        setLanguage(language)
+        const alert = text(find(view.render(), node => node.props.role === 'alert'))
+        assert.ok(alert.includes(copy[language].sessionLockBusy), `${method}/${transport}/${language} must show localized actionable advice: ${alert}`)
+        assert.ok(alert.includes(message), 'full underlying error, stage, id and batch counts stay visible')
+      }
+      setLanguage('en')
+      assert.equal(records.has('busy-session'), true)
+      assert.ok(group(view.render()), 'busy deletion stays retryable')
+      view.unmount()
+    }
+    for (const message of [
+      'Physical deletion [lock] (busy-session): Session lock is busy; session may be open or writing',
+      '[D_TRASH_SESSION_LOCK_BUSY_OTHER] unrelated failure',
+      `Other error mentioning ${SESSION_LOCK_BUSY_PREFIX}in its detail`,
+    ]) {
+      hostRemote[method] = async () => ({ ok: false, error: { message } })
+      view = setup(); view.render(); await tick()
+      button(view.render(), label).props.onClick()
+      button(group(view.render()), label).props.onClick(); await tick()
+      const alert = text(find(view.render(), node => node.props.role === 'alert'))
+      assert.ok(alert.includes(message))
+      assert.ok(!alert.includes(copy.en.sessionLockBusy), 'do not infer busy state from fuzzy text')
+      view.unmount()
+    }
+    hostRemote[method] = original
+  }
   records.clear()
+  console.log('PASS: lock-busy exact wire prefix, bilingual actionable Client advice, preserved details and retry, no fuzzy matches')
+
   panelFailures.listTrash = true
   view = setup(); view.render(); await tick(); tree = view.render()
   assertAlert(tree, /Could not load trash: denied listTrash/)

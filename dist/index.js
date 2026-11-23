@@ -37,6 +37,7 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { z } from 'zod';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { SessionPurger, PurgeError } from './purge.js';
+import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX } from './types.js';
 import { OperationLog } from './operation-log.js';
 const trashDomain = defineDomain({
     name: 'trash',
@@ -182,8 +183,11 @@ let TrashService = (() => {
                         failed++;
                     }
                 }
-                if (failures.length)
-                    throw new AggregateError(failures, `Physical deletion: ${deleted} deleted, ${failures.length} failed: ${failures.map(String).join('; ')}`);
+                if (failures.length) {
+                    const prefix = failures.some(error => error instanceof PurgeError && error.code === TrashErrorCode.SessionLockBusy)
+                        ? SESSION_LOCK_BUSY_PREFIX : '';
+                    throw new AggregateError(failures, `${prefix}Physical deletion: ${deleted} deleted, ${failures.length} failed: ${failures.map(String).join('; ')}`);
+                }
                 return deleted;
             }, 'summary', () => `${deleted} deleted, ${failed} failed`));
         }

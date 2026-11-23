@@ -1,3 +1,4 @@
+import { TrashErrorCode } from './types.js';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence';
 /** Durable intent stays with the marker until all required record cleanup commits. */
@@ -16,7 +17,8 @@ interface StagedDeletion {
 export declare class PurgeError extends Error {
     readonly sessionId: SessionId;
     readonly stage: string;
-    constructor(sessionId: SessionId, stage: string, cause: unknown);
+    readonly code?: TrashErrorCode | undefined;
+    constructor(sessionId: SessionId, stage: string, cause: unknown, code?: TrashErrorCode | undefined);
 }
 /** JSONL maintenance. Never creates/truncates/unlinks a live POSIX lock file. */
 export declare class SessionPurger {

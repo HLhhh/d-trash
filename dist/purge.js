@@ -2,14 +2,17 @@ import { lstat, mkdir, rename, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { acquireWriteLease } from './write-lease.js';
+import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX } from './types.js';
 import { retrySharing, isCanonicalPath } from './fs-retry.js';
 export class PurgeError extends Error {
     sessionId;
     stage;
-    constructor(sessionId, stage, cause) {
-        super(`Physical deletion [${stage}] (${sessionId}): ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    code;
+    constructor(sessionId, stage, cause, code) {
+        super(`${code === TrashErrorCode.SessionLockBusy ? SESSION_LOCK_BUSY_PREFIX : ''}Physical deletion [${stage}] (${sessionId}): ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
         this.sessionId = sessionId;
         this.stage = stage;
+        this.code = code;
     }
 }
 const same = (a, b) => a.dev === b.dev && a.ino === b.ino;
@@ -86,8 +89,9 @@ export class SessionPurger {
             }
             await this.report(id, 'gate');
             stage = 'lock';
-            const lease = await acquireWriteLease(before.source);
+            let acquired;
             try {
+                const lease = acquired = await acquireWriteLease(before.source);
                 await this.report(id, 'locked');
                 stage = 'recheck';
                 await lease.verify();
@@ -138,14 +142,16 @@ export class SessionPurger {
             finally {
                 // POSIX closes the inode moved by rename; Windows releases the original
                 // path-named semaphore. Neither branch unlinks a held lock.
-                await lease.release();
-                await this.report(id, 'unlocked');
+                if (acquired) {
+                    await acquired.release();
+                    await this.report(id, 'unlocked');
+                }
             }
         }
         catch (error) {
             const code = error?.code;
             if (stage === 'lock' && (code === 'EBUSY' || code === 'EAGAIN' || code === 'EWOULDBLOCK')) {
-                throw new PurgeError(id, 'lock', new Error('Session lock is busy; session may be open or writing', { cause: error }));
+                throw new PurgeError(id, 'lock', new Error('Session lock is busy; session may be open or writing', { cause: error }), TrashErrorCode.SessionLockBusy);
             }
             throw new PurgeError(id, stage, error);
         }

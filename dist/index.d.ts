@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
-import type { TrashRecord } from './types.js';
+import { type TrashRecord } from './types.js';
 export type { TrashRecord } from './types.js';
 declare module '@deepseek-ai/cordis' {
     interface Context {

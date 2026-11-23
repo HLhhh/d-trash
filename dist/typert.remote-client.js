@@ -60,7 +60,7 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
         create: d_trash_trash_listTrash_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported selected tuple type',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":284,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":288,"column":9},
     },
     'trash/removeFromTrash': {
       service: 'trash',

@@ -83,10 +83,21 @@ marker 的可选私有 `purge` 存 source/target/dev/ino/deleting/logsDeleted；
 原生写入与插件不是一个事务；全局插件边界覆盖恢复/删除/清空，不能阻止原生取消归档或重建路径。
 
 失败用 `Physical deletion [stage] (id): reason` 报告，结构化日志包含 sessionId/stage/result/reason。
+取写租约遇到占用时，Host `PurgeError.code` 为 `D_TRASH_SESSION_LOCK_BUSY`，消息以精确前缀
+`[D_TRASH_SESSION_LOCK_BUSY] ` 开头；`emptyTrash` 只要有此类失败，汇总消息也带相同前缀，保留成功/失败数与逐项原错。
+Client 仅对删除/清空失败消息的此前缀展示 locale 中的中英操作建议，不模糊匹配 busy/lock 等文字；完整底层阶段、session id、原因及清空计数仍显示。
 `emptyTrash` 尝试全部条目，失败汇总成功数与阶段。Client 对失败也重读列表和只读 Workspace 投影，
 显示部分成功和可重试的诊断条目。投影缓存失败只记录警告，此时 marker 可能已清除，不保证后续 purge 自动重试缓存。搜索索引依赖下一次稳定搜索观测时的现有同步收敛；已检查的 query API 没有公开 rescan，不调用私有 `_reconcile` 或直接编辑 SQLite。
 附件、工作区文件、worktree、产物、服务端日志、备份及其它插件扫描快照均保留；不承诺安全擦除或搜索立即消失。
 仅覆盖 JSONL 与进程崩溃，不声称断电事务；有 pending 凭据时不要降级旧版插件。
+
+## 已知限制：已加载会话与写租约
+
+已加载/已 enter 的会话会由 DSH 持有官方写租约，插件无法取得互斥时必须拒绝物理删除。
+用户真机调查中，`lsof` 显示 DSH 以写句柄持有 `session.lock`；这是平台约束，不是允许强删的残留锁。
+官方无供插件使用的公开卸载/close API；插件不释放其它服务所有的生命周期或写句柄。
+请先切换离开到其它会话或重启 DSH 后再试；切换不会保证卸载已加载会话，若仍占用请重启 DSH。
+绝不因锁占用而盲删、unlink 锁文件、夺锁或绕过官方写租约。此故障调查来自用户，本轮只做合成临时 home 回归，未进行真机复验。
 
 ## 持久化操作日志
 
@@ -127,6 +138,8 @@ POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并
 
 purge 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`，幽灵记录使用独立的 `logs-absent`；
 工作区 detach 每次实际尝试各记一条，不为非成员或零归属伪造 detach 行；日志行数不固定。
+`unlocked/ok` 仅在真正取得租约且 `release()` 成功后写入；取锁失败不产生 `locked` 或 `unlocked` 行。
+lock-busy 路径为 `gate/ok → lock/failed → complete/failed`，正常成功的 `renamed → unlocked → logs-deleted` 顺序不变。
 失败按实际阶段记录，缓存清理失败为 `projection/warning`。
 每条追加尝试都会等待完成；rename 事件在测试 SIGKILL 前已写出。日志不是业务提交凭据，
 也没有断电级 fsync 保证。任意定位、轮转、创建、打开、追加、关闭失败均不改变主操作结果，

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Busy session write leases now carry the stable `[D_TRASH_SESSION_LOCK_BUSY] ` wire prefix for delete and partial empty failures. The Client adds English/Chinese switching/restart advice while preserving underlying details; audit unlock reporting explicitly requires an acquired, successfully released lease. Added exact-prefix Client and real-lease/audit regressions, and documented the loaded-session platform limitation without bypassing locks.
 - Delete/empty now cleans ghost records re-created from stale Client lists when the first persistence `stat` explicitly returns `undefined` and marker/archive gates pass. Cleanup skips log deletion, records `logs-absent`, detaches current owners, unarchives, removes the marker, and attempts projection cleanup using a validated home. Thrown stat errors (including I/O failures), unreliable snapshots, and missing locations during later locked rechecks still refuse cleanup. Existing purge receipt validation/recovery is preserved. Added isolated ghost, refusal, interleaving, and recovery regressions for Node and installed Electron discovery.
 
 ### Added

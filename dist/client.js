@@ -5,6 +5,9 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
+  // src/types.ts
+  var SESSION_LOCK_BUSY_PREFIX = `[${"D_TRASH_SESSION_LOCK_BUSY" /* SessionLockBusy */}] `;
+
   // locale/en.json
   var en_default = {
     meta: {
@@ -30,6 +33,7 @@
       restoreFailed: "Could not restore session: {reason}",
       deleteFailed: "Could not physically delete session: {reason}",
       emptyFailed: "Could not empty trash: {reason}",
+      sessionLockBusy: "This session is currently open or in use. Switch to another session (or restart DSH), then retry Delete forever. A loaded session may remain locked after switching; restart DSH if it still fails.",
       working: "Working\u2026",
       trashedAt: "Moved to trash: {time}",
       workspace: "Workspace: {workspace}",
@@ -65,6 +69,7 @@
       restoreFailed: "\u6062\u590D\u4F1A\u8BDD\u5931\u8D25\uFF1A{reason}",
       deleteFailed: "\u7269\u7406\u5220\u9664\u4F1A\u8BDD\u5931\u8D25\uFF1A{reason}",
       emptyFailed: "\u6E05\u7A7A\u56DE\u6536\u7AD9\u5931\u8D25\uFF1A{reason}",
+      sessionLockBusy: "\u8BE5\u4F1A\u8BDD\u5F53\u524D\u5DF2\u6253\u5F00\u6216\u6B63\u5728\u4F7F\u7528\uFF0C\u8BF7\u5148\u5207\u6362\u5230\u5176\u5B83\u4F1A\u8BDD\uFF08\u6216\u91CD\u542F DSH\uFF09\u540E\u518D\u5F7B\u5E95\u5220\u9664\u3002\u5DF2\u52A0\u8F7D\u4F1A\u8BDD\u5207\u6362\u540E\u53EF\u80FD\u4ECD\u6301\u9501\uFF0C\u82E5\u4ECD\u5931\u8D25\u8BF7\u91CD\u542F DSH\u3002",
       working: "\u6B63\u5728\u5904\u7406\u2026",
       trashedAt: "\u6536\u8FDB\u65F6\u95F4\uFF1A{time}",
       workspace: "\u6240\u5C5E\u5DE5\u4F5C\u533A\uFF1A{workspace}",
@@ -237,6 +242,7 @@
 
   // src/client.ts
   function registerTrashClient(contribution) {
+    const errorMessage = (reason) => reason !== null && typeof reason === "object" && "message" in reason && typeof reason.message === "string" ? reason.message : String(reason);
     const namespace = "trash";
     const css = `
   .trash-menu { display:flex; align-items:center; gap:6px; box-sizing:border-box;
@@ -406,7 +412,7 @@
             } catch (reason) {
               if (mounted.current) setFailure({
                 key: failureKey,
-                reason: reason instanceof Error ? reason.message : String(reason)
+                reason: errorMessage(reason)
               });
             } finally {
               busy.current = false;
@@ -424,7 +430,7 @@
             ).catch((reason) => {
               if (mounted.current && request.current === token) setFailure({
                 key: "loadFailed",
-                reason: reason instanceof Error ? reason.message : String(reason)
+                reason: errorMessage(reason)
               });
             }).finally(() => {
               if (mounted.current && request.current === token) setPending(false);
@@ -461,7 +467,12 @@
                 )
               ),
               h("p", { className: "trash-panel-note" }, t("physicalDeletion")),
-              failure2 && h("div", { className: "trash-error", role: "alert" }, t(failure2.key, { reason: failure2.reason })),
+              failure2 && h(
+                "div",
+                { className: "trash-error", role: "alert" },
+                (failure2.key === "deleteFailed" || failure2.key === "emptyFailed") && failure2.reason.startsWith(SESSION_LOCK_BUSY_PREFIX) && h("p", null, t("sessionLockBusy")),
+                t(failure2.key, { reason: failure2.reason })
+              ),
               pending && h("p", { role: "status" }, t(entries === null ? "loading" : "working")),
               confirmation?.kind === "empty" && h(
                 "div",
@@ -20670,7 +20681,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_listTrash_result$schema,
           jsonSchemaError: "typert tool schema: unsupported selected tuple type"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 284, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 288, "column": 9 }
       },
       "trash/removeFromTrash": {
         service: "trash",

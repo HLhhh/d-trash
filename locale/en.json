@@ -22,6 +22,7 @@
     "restoreFailed": "Could not restore session: {reason}",
     "deleteFailed": "Could not physically delete session: {reason}",
     "emptyFailed": "Could not empty trash: {reason}",
+    "sessionLockBusy": "This session is currently open or in use. Switch to another session (or restart DSH), then retry Delete forever. A loaded session may remain locked after switching; restart DSH if it still fails.",
     "working": "Working…",
     "trashedAt": "Moved to trash: {time}",
     "workspace": "Workspace: {workspace}",

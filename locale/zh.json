@@ -22,6 +22,7 @@
     "restoreFailed": "恢复会话失败：{reason}",
     "deleteFailed": "物理删除会话失败：{reason}",
     "emptyFailed": "清空回收站失败：{reason}",
+    "sessionLockBusy": "该会话当前已打开或正在使用，请先切换到其它会话（或重启 DSH）后再彻底删除。已加载会话切换后可能仍持锁，若仍失败请重启 DSH。",
     "working": "正在处理…",
     "trashedAt": "收进时间：{time}",
     "workspace": "所属工作区：{workspace}",

@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { SessionPurger, PurgeError, type PurgeIntent } from './purge.js'
-import type { TrashRecord } from './types.js'
+import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX, type TrashRecord } from './types.js'
 import { OperationLog, type TrashAction } from './operation-log.js'
 
 export type { TrashRecord } from './types.js'
@@ -143,8 +143,12 @@ export default class TrashService extends TypertRemoteService {
         try { if (await this.operation('emptyTrash', id, () => this.purgeSession(id))) deleted++ }
         catch (error) { failures.push(error); failed++ }
       }
-      if (failures.length) throw new AggregateError(failures,
-        `Physical deletion: ${deleted} deleted, ${failures.length} failed: ${failures.map(String).join('; ')}`)
+      if (failures.length) {
+        const prefix = failures.some(error => error instanceof PurgeError && error.code === TrashErrorCode.SessionLockBusy)
+          ? SESSION_LOCK_BUSY_PREFIX : ''
+        throw new AggregateError(failures,
+          `${prefix}Physical deletion: ${deleted} deleted, ${failures.length} failed: ${failures.map(String).join('; ')}`)
+      }
       return deleted
     }, 'summary', () => `${deleted} deleted, ${failed} failed`))
   }
