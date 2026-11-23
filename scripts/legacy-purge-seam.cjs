@@ -6,6 +6,7 @@ module.exports = function legacyPurgeSeam(trash) {
       gate()
       await save({ source: 'protocol-fixture', target: id, dev: '0', ino: '0', logsDeleted: false, deleting: false })
       gate()
+      return 'moved'
     },
     async deleteStaged() { return { status: 'deleted', home: 'protocol-fixture' } },
     async clearProjection() {},

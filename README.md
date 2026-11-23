@@ -60,6 +60,8 @@ The Host service is the only writer of Trash state. Ordinary visible Trash is **
 
 Permanent deletion requires a validated JSONL session path and matching filesystem identity. The Host acquires backend-compatible write exclusion: official `flock` on an existing `session.lock` on POSIX, or the backend-named kernel semaphore via Koffi on Windows, persists deletion intent, rechecks identity, renames the whole session directory into a same-device staging directory beside `sessions`, closes the lock, then removes the staged directory. It then clears workspace membership, archive state, and the marker, and attempts projection-cache cleanup. Failed cleanup keeps durable receipts for a later delete/empty retry; pending diagnostics stay visible independently of the ordinary Trash intersection.
 
+If a stale Client list moves an already deleted session back to Trash, a first `stat` returning exactly `undefined` allows record cleanup while its marker exists and it remains archived. The Host skips log deletion, detaches current owning workspaces, unarchives, removes the marker, and attempts projection cleanup; delete returns `true`, and empty counts it as a success. Audit stage `logs-absent` explains this case. A thrown `stat` error (including I/O errors), a mismatched header id, a non-JSONL snapshot, or a relative/missing location still refuses cleanup. Existing purge receipts always follow receipt validation and recovery. Projection cleanup uses a previously validated stat/source home or another reliable session; without one it records a warning, and audit logging falls back to the Host logger.
+
 See [DETAIL.md](./docs/DETAIL.md) and [PLAN.md](./PLAN.md) for the full protocol and recovery boundaries.
 
 ## Compatibility

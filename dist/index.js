@@ -79,6 +79,7 @@ let TrashService = (() => {
         operationLog;
         action = new AsyncLocalStorage();
         domainPromise;
+        persistenceHome;
         sessions = new Map();
         boundary = Promise.resolve();
         constructor(ctx) {
@@ -207,22 +208,26 @@ let TrashService = (() => {
          * list supplies candidate ids only; it never authorizes a guessed log path.
          */
         async logHome(id) {
+            // Reuse only a home previously validated from stat/source, including when
+            // a stale Client re-trashes a session whose logs have already been deleted.
+            if (this.persistenceHome)
+                return this.persistenceHome;
             const domain = await this.domainPromise?.catch(() => undefined);
             const table = domain?.table('trash');
             const source = id === undefined ? undefined : table?.get(id)?.purge?.source;
             if (source)
                 try {
-                    return await this.purger.homeFromSource(source);
+                    return this.persistenceHome = await this.purger.homeFromSource(source);
                 }
                 catch { /* try stat */ }
             if (id !== undefined)
                 try {
-                    return await this.purger.home(id);
+                    return this.persistenceHome = await this.purger.home(id);
                 }
                 catch { /* try other evidence */ }
             for (const [candidate, record] of table?.entries() ?? []) {
                 try {
-                    return record.purge ? await this.purger.homeFromSource(record.purge.source) : await this.purger.home(candidate);
+                    return this.persistenceHome = record.purge ? await this.purger.homeFromSource(record.purge.source) : await this.purger.home(candidate);
                 }
                 catch { /* another receipt/session may still locate this Host's home */ }
             }
@@ -230,7 +235,7 @@ let TrashService = (() => {
             if (persistence)
                 for (const snapshot of await persistence.list()) {
                     try {
-                        return await this.purger.home(snapshot.header.id);
+                        return this.persistenceHome = await this.purger.home(snapshot.header.id);
                     }
                     catch { /* skip unreliable locations */ }
                 }
@@ -269,6 +274,7 @@ let TrashService = (() => {
             const table = (await this.domain()).table('trash');
             const registry = this.workspaceRegistry();
             let record = table.get(sessionId);
+            let home;
             let stage = 'gate';
             try {
                 if (!record)
@@ -280,19 +286,25 @@ let TrashService = (() => {
                             throw new Error('Session must be in trash and still archived');
                         }
                     };
-                    await this.purger.move(sessionId, gate, async (purge) => {
+                    const moved = await this.purger.move(sessionId, gate, async (purge) => {
                         await table.put(sessionId, { ...original, purge: { ...purge } });
                     });
+                    if (moved === 'logs-absent') {
+                        await this.report(sessionId, 'logs-absent', 'ok', 'stat returned undefined; local logs already absent; cleaning records only');
+                    }
                     record = table.get(sessionId);
                 }
-                stage = 'delete-staged';
-                const intent = { ...record.purge };
-                const result = await this.purger.deleteStaged(sessionId, intent, purge => table.put(sessionId, { ...record, purge: { ...purge } }));
-                if (result.status !== 'deleted')
-                    throw new Error('Rename did not commit; retry deletion');
-                await this.report(sessionId, stage, 'ok');
-                record = { ...record, purge: { ...intent, logsDeleted: true } };
-                await table.put(sessionId, record);
+                if (record.purge) {
+                    stage = 'delete-staged';
+                    const intent = { ...record.purge };
+                    const result = await this.purger.deleteStaged(sessionId, intent, purge => table.put(sessionId, { ...record, purge: { ...purge } }));
+                    if (result.status !== 'deleted')
+                        throw new Error('Rename did not commit; retry deletion');
+                    home = result.home;
+                    await this.report(sessionId, stage, 'ok');
+                    record = { ...record, purge: { ...intent, logsDeleted: true } };
+                    await table.put(sessionId, record);
+                }
                 stage = 'detach';
                 const failures = [];
                 for (const workspace of registry.list()) {
@@ -316,7 +328,7 @@ let TrashService = (() => {
                 await table.delete(sessionId);
                 await this.report(sessionId, stage, 'ok');
                 try {
-                    await this.purger.clearProjection(sessionId, result.home);
+                    await this.purger.clearProjection(sessionId, home ?? await this.logHome(sessionId));
                     await this.report(sessionId, 'projection', 'ok');
                 }
                 catch (error) {

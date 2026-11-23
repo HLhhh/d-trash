@@ -60,6 +60,8 @@ Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为�
 
 物理删除先校验 JSONL 路径和文件系统身份。Host 使用与 backend 兼容的写租约：POSIX 对既有 `session.lock` 使用官方 `flock`，Windows 经 Koffi 获取同名内核信号量，持久化删除 intent，复核身份，将整个会话目录 rename 到 `sessions` 旁的同设备暂存目录，关闭锁后再删除暂存。之后清理工作区成员、归档和 marker，并尝试清理投影缓存。失败保留持久凭据，下次删除或清空时重试；待清理诊断独立于普通回收站交集展示。
 
+客户端陈旧列表可能把已删除的会话再次收进回收站。首次 `stat` 明确返回 `undefined` 时，只有 marker 存在且仍归档才允许清理幽灵记录：跳过日志删除，依次 detach 当前所属工作区、取消归档、删 marker、尝试清投影；删除成功返回 `true`，清空计为成功，并记录 `logs-absent` 阶段及原因。`stat` 抛错（含 I/O 故障）、header.id 不符、非 JSONL、相对路径或缺失 location 仍拒绝清理。已有 purge 凭据始终按原协议校验、恢复。投影清理复用已校验的 stat/source home 或其它可靠会话的 home；无可靠 home 时只记 warning，审计日志降级 Host logger，不猜路径。
+
 完整协议和恢复边界见 [DETAIL.md](./docs/DETAIL.md) 与 [PLAN.md](./PLAN.md)。
 
 ## 兼容性

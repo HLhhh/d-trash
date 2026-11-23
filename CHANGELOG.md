@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Delete/empty now cleans ghost records re-created from stale Client lists when the first persistence `stat` explicitly returns `undefined` and marker/archive gates pass. Cleanup skips log deletion, records `logs-absent`, detaches current owners, unarchives, removes the marker, and attempts projection cleanup using a validated home. Thrown stat errors (including I/O failures), unreliable snapshots, and missing locations during later locked rechecks still refuse cleanup. Existing purge receipt validation/recovery is preserved. Added isolated ghost, refusal, interleaving, and recovery regressions for Node and installed Electron discovery.
+
 ### Added
 
 - Size-based audit rotation with fixed 4 MiB / three-archive retention, rotation records, safe file validation, and best-effort logger fallback. Added threshold, eviction, exact-line retention, failure/retry, concurrent rotation, and late old-handle regressions.

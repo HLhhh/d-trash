@@ -310,4 +310,5 @@ await import('./generator-regressions.mjs')
 
 await import('./platform-regressions.mjs')
 await import('./phase4-regressions.mjs')
+await import('./ghost-regressions.mjs')
 await import('./operation-log-regressions.mjs')

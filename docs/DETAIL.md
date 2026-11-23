@@ -43,7 +43,7 @@ marker 写入失败时，仅在原先未归档且确认没有 marker 时撤销�
 `@deepseek-ai/node-addon-system/flock`，以 O_NOFOLLOW 打开既有普通锁文件，不创建/截断/unlink；
 Windows 只加载 Koffi 3.1.1，以 `Local\dsh-session-lock-<sha256(resolve(lockPath).toLowerCase())>`
 命名的 count-1 内核信号量与 JSONL backend 写者互斥，不需要 `session.lock`，也不加载 POSIX addon。
-locate 和审计日志不依赖锁文件；任何平台缺少可靠互斥、匹配 JSONL stat/header/绝对 path 或文件身份时拒绝删除。
+locate 和审计日志不依赖锁文件；日志存在时，任何平台缺少可靠互斥、匹配 JSONL stat/header/绝对 path 或文件身份时拒绝删除。
 安装版 Electron 44.7.0 / Node 24.21.0 直接 import 官方 `src/lease.ts` 实测失败：
 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，所以使用等价协议，没有运行时 TS 转译兜底。
 官方 POSIX lease 的 `open('w')` 会截断但不 unlink；本插件采用更严格的既有文件 open。
@@ -51,6 +51,15 @@ locate 和审计日志不依赖锁文件；任何平台缺少可靠互斥、匹�
 根名必须为 `sessions`，home、根与日志/会话路径必须通过 realpath 校验，限定两层会话目录并禁止 symlink。
 不读取环境变量 `DSH_HOME`，缺失或错误值都不影响定位；下文 `$DSH_HOME` 均指反推并校验的 home。
 取锁后及 intent 持久化后重复 stat/realpath/dev/ino 校验。原目录名只由 stat 提供，不自行编码推导。
+
+无 purge 凭据时，首次定位严格区分三种结果：
+
+- `stat(id) === undefined`：按 persistence 契约确认日志已不存在；在 stat 前后检查 marker 存在且仍归档，跳过锁、intent、rename、rm，只走 detach 当前所属工作区 → unarchive → 删 marker → 尝试清投影缓存。成功返回 `true`，empty 计成功一项；以 `logs-absent/ok` 写明「stat 返回 undefined、日志已不存在、只清记录」，不伪造 `logs-deleted`。
+- 返回 snapshot 但 header.id 不匹配、非 JSONL、路径非绝对或 location 缺失：仍在 gate 拒绝，保留记录与日志；可靠 snapshot 对应的文件系统校验失败（包括 ENOENT）也不等同于 stat 返回 undefined。
+- stat 抛错：保留错误与 cause，在 gate 拒绝，绝不把 I/O 故障或抛出的 ENOENT 转为「已删除」。取锁后/intent 后复核时的 undefined 仍拒绝，不切换幽灵分支。
+
+该分支处理客户端陈旧列表将已成功物理删除的 id 再次收进造成的幽灵记录。已有 purge 凭据优先执行原恢复协议，非法凭据不能借 undefined 绕过校验。幽灵记录不生成虚构 source/target 或删除凭据；detach 等必要记录清理失败仍按实际阶段报告，普通 marker 仍遵守归档交集/对账规则。可重试时再次执行 stat 与归档门禁，不承诺幽灵清理的跨服务事务。
+Host 缓存由 stat/source 校验过的 home，供后续幽灵记录的投影清理复用；重启后可从其它可靠会话/凭据定位。清投影仍重新校验 canonical home/cache 路径；没有可靠 home 时仅 `projection/warning`，不从环境变量或 session id 猜路径，日志依既有规则降级 logger。
 
 执行顺序是写租约 → 复核 → marker 保存 purge intent → 最后复核 → 整体 rename 到
 `$DSH_HOME/sessions.trash-purge-staging/<encoded-id>-<uuid>` → close 释放锁 →
@@ -70,7 +79,7 @@ marker 的可选私有 `purge` 存 source/target/dev/ino/deleting/logsDeleted；
 旧根内暂存凭据或其它非法 target 保留诊断，不自动迁移、删除或撤销凭据；
 部分 rm 删除锁后凭 durable deleting 阶段继续重试。无凭据、路径不可靠或 source 被重建时拒绝猜测。
 未发生 rename 的 intent 可安全撤销；已删除日志而记录失败可直接重试记录清理。
-投影清理接收 `deleteStaged` 返回的已验证 home，不重新从环境变量取路径。
+有凭据的投影清理接收 `deleteStaged` 返回的已验证 home；幽灵分支使用上述已验证 home，均不从环境变量取路径。
 原生写入与插件不是一个事务；全局插件边界覆盖恢复/删除/清空，不能阻止原生取消归档或重建路径。
 
 失败用 `Physical deletion [stage] (id): reason` 报告，结构化日志包含 sessionId/stage/result/reason。
@@ -116,7 +125,7 @@ POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并
 | `recovery` | 每条待恢复凭据的阶段与 `recovery` 结果；成功 `deleted` / `unmoved`，失败 `failed` |
 | `log-rotate` | 成功 `complete/ok`；`reason` 含文件序号、保留范围、实际淘汰文件或 none 和阈值；失败按实际步骤（含序号）降级 logger |
 
-purge 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`；
+purge 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`，幽灵记录使用独立的 `logs-absent`；
 工作区 detach 每次实际尝试各记一条，不为非成员或零归属伪造 detach 行；日志行数不固定。
 失败按实际阶段记录，缓存清理失败为 `projection/warning`。
 每条追加尝试都会等待完成；rename 事件在测试 SIGKILL 前已写出。日志不是业务提交凭据，
@@ -268,7 +277,7 @@ if ($LASTEXITCODE -ne 0) { throw 'pack failed' }
 ```
 
 预期 build 输出 Typert / Client generated/bundled；npm test 输出平台 10 passed/0 skipped、phase4 27 passed/10 skipped、
-日志 26 passed/3 skipped（每个 SKIP 带 POSIX 原因），其余 Host/Client/生成器通过，退出码 0。
+日志 26 passed/3 skipped（每个 SKIP 带 POSIX 原因），幽灵记录 18 passed/0 skipped，其余 Host/Client/生成器通过，退出码 0。
 无安装版变量时 discovery 明确输出 SKIP，不算 discovery 通过。若已安装 DSH，可仅设置以下两个路径再运行；
 runner 负责 ELECTRON_RUN_AS_NODE、等待 GUI 子系统 Electron 退出和转发输出，无需修改 profile：
 

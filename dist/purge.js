@@ -23,7 +23,12 @@ export class SessionPurger {
         this.report = report;
     }
     /** Shared authority for operation logs; no environment-variable fallback. */
-    async home(id) { return (await this.locate(id)).home; }
+    async home(id) {
+        const located = await this.locate(id);
+        if (!located)
+            throw new Error('No stat-derived home for absent session');
+        return located.home;
+    }
     async homeFromSource(source) { return (await this.roots(source)).home; }
     /** Derive from stat's source, or its durable receipt after the source is gone.
      * DSH_HOME is a shell hint, not the Host's persistence location authority.
@@ -46,7 +51,11 @@ export class SessionPurger {
         return { home, root, staging: join(home, 'sessions.trash-purge-staging') };
     }
     async locate(id) {
+        // Only an explicit undefined is absence. Observation/I/O errors and invalid
+        // snapshots must propagate; neither authorizes record-only cleanup.
         const snapshot = await this.observe(id);
+        if (snapshot === undefined)
+            return undefined;
         if (!snapshot || snapshot.header.id !== id || snapshot.location?.kind !== 'jsonl'
             || !isAbsolute(snapshot.location.path))
             throw new Error('No reliable JSONL session location/identity');
@@ -69,6 +78,12 @@ export class SessionPurger {
         try {
             gate();
             const before = await this.locate(id);
+            if (!before) {
+                // Native unarchive can interleave while stat is awaiting. No directory
+                // or receipt is invented for a ghost; recheck before record cleanup.
+                gate();
+                return 'logs-absent';
+            }
             await this.report(id, 'gate');
             stage = 'lock';
             const lease = await acquireWriteLease(before.source);
@@ -77,7 +92,7 @@ export class SessionPurger {
                 stage = 'recheck';
                 await lease.verify();
                 const after = await this.locate(id);
-                if (after.source !== before.source || after.log !== before.log || !same(after.identity, before.identity)) {
+                if (!after || after.source !== before.source || after.log !== before.log || !same(after.identity, before.identity)) {
                     throw new Error('Session directory identity changed');
                 }
                 gate();
@@ -98,7 +113,7 @@ export class SessionPurger {
                 await retrySharing(async () => {
                     stage = 'recheck';
                     const final = await this.locate(id);
-                    if (final.source !== before.source || final.log !== before.log || !same(final.identity, before.identity)
+                    if (!final || final.source !== before.source || final.log !== before.log || !same(final.identity, before.identity)
                         || !await isCanonicalPath(staging)
                         || !same(before.identity, await lstat(before.source, { bigint: true })))
                         throw new Error('Directory identity changed before rename');
@@ -118,7 +133,7 @@ export class SessionPurger {
                     await this.renameDirectory(before.source, intent.target);
                 });
                 await this.report(id, 'renamed');
-                return intent;
+                return 'moved';
             }
             finally {
                 // POSIX closes the inode moved by rename; Windows releases the original

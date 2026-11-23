@@ -15,6 +15,7 @@ export default class TrashService extends TypertRemoteService {
     private readonly operationLog;
     private readonly action;
     private domainPromise?;
+    private persistenceHome?;
     private readonly sessions;
     private boundary;
     constructor(ctx: Context);

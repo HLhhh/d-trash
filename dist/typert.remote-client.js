@@ -46,7 +46,7 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
         create: d_trash_trash_emptyTrash_result$schema,
         jsonSchema: {"type":"number"},
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":134,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":135,"column":9},
     },
     'trash/listTrash': {
       service: 'trash',
@@ -60,7 +60,7 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
         create: d_trash_trash_listTrash_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported selected tuple type',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":273,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":284,"column":9},
     },
     'trash/removeFromTrash': {
       service: 'trash',
@@ -90,7 +90,7 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
         create: d_trash_trash_removeFromTrash_result$schema,
         jsonSchema: {"type":"boolean"},
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":125,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":126,"column":9},
     },
     'trash/restoreSession': {
       service: 'trash',
@@ -120,7 +120,7 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
         create: d_trash_trash_restoreSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":103,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":104,"column":9},
     },
     'trash/trashSession': {
       service: 'trash',
@@ -150,7 +150,7 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
         create: d_trash_trash_trashSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":71,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":72,"column":9},
     },
   },
 }, z)

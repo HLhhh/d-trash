@@ -32,7 +32,7 @@ export declare class SessionPurger {
     private roots;
     private locate;
     /** Write lease → recheck → durable intent → final gate → whole-directory rename → close. */
-    move(id: SessionId, gate: () => void, save: (intent: PurgeIntent) => Promise<void>): Promise<PurgeIntent>;
+    move(id: SessionId, gate: () => void, save: (intent: PurgeIntent) => Promise<void>): Promise<'moved' | 'logs-absent'>;
     /** Resume only marker intents targeting the sibling staging; never sweep unknown directories. */
     deleteStaged(id: SessionId, intent: PurgeIntent, save: (intent: PurgeIntent) => Promise<void>): Promise<StagedDeletion>;
     /** Separate methods permit sharing-violation injection in isolated fixtures. */

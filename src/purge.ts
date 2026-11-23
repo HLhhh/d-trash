@@ -49,7 +49,11 @@ export class SessionPurger {
     private readonly report: (id: SessionId, stage: string) => Promise<void> = async () => {}) {}
 
   /** Shared authority for operation logs; no environment-variable fallback. */
-  async home(id: SessionId): Promise<string> { return (await this.locate(id)).home }
+  async home(id: SessionId): Promise<string> {
+    const located = await this.locate(id)
+    if (!located) throw new Error('No stat-derived home for absent session')
+    return located.home
+  }
 
   async homeFromSource(source: string): Promise<string> { return (await this.roots(source)).home }
 
@@ -72,8 +76,11 @@ export class SessionPurger {
     return { home, root, staging: join(home, 'sessions.trash-purge-staging') }
   }
 
-  private async locate(id: SessionId): Promise<LocatedSession> {
+  private async locate(id: SessionId): Promise<LocatedSession | undefined> {
+    // Only an explicit undefined is absence. Observation/I/O errors and invalid
+    // snapshots must propagate; neither authorizes record-only cleanup.
     const snapshot = await this.observe(id)
+    if (snapshot === undefined) return undefined
     if (!snapshot || snapshot.header.id !== id || snapshot.location?.kind !== 'jsonl'
       || !isAbsolute(snapshot.location.path)) throw new Error('No reliable JSONL session location/identity')
     const log = resolve(snapshot.location.path)
@@ -89,11 +96,17 @@ export class SessionPurger {
   }
 
   /** Write lease → recheck → durable intent → final gate → whole-directory rename → close. */
-  async move(id: SessionId, gate: () => void, save: (intent: PurgeIntent) => Promise<void>): Promise<PurgeIntent> {
+  async move(id: SessionId, gate: () => void, save: (intent: PurgeIntent) => Promise<void>): Promise<'moved' | 'logs-absent'> {
     let stage = 'gate'
     try {
       gate()
       const before = await this.locate(id)
+      if (!before) {
+        // Native unarchive can interleave while stat is awaiting. No directory
+        // or receipt is invented for a ghost; recheck before record cleanup.
+        gate()
+        return 'logs-absent'
+      }
       await this.report(id, 'gate')
       stage = 'lock'
       const lease = await acquireWriteLease(before.source)
@@ -102,7 +115,7 @@ export class SessionPurger {
         stage = 'recheck'
         await lease.verify()
         const after = await this.locate(id)
-        if (after.source !== before.source || after.log !== before.log || !same(after.identity, before.identity)) {
+        if (!after || after.source !== before.source || after.log !== before.log || !same(after.identity, before.identity)) {
           throw new Error('Session directory identity changed')
         }
         gate()
@@ -121,7 +134,7 @@ export class SessionPurger {
         await retrySharing(async () => {
           stage = 'recheck'
           const final = await this.locate(id)
-          if (final.source !== before.source || final.log !== before.log || !same(final.identity, before.identity)
+          if (!final || final.source !== before.source || final.log !== before.log || !same(final.identity, before.identity)
             || !await isCanonicalPath(staging)
             || !same(before.identity, await lstat(before.source, { bigint: true }))) throw new Error('Directory identity changed before rename')
           await lease.verify()
@@ -134,7 +147,7 @@ export class SessionPurger {
           await this.renameDirectory(before.source, intent.target)
         })
         await this.report(id, 'renamed')
-        return intent
+        return 'moved'
       } finally {
         // POSIX closes the inode moved by rename; Windows releases the original
         // path-named semaphore. Neither branch unlinks a held lock.

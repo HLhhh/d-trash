@@ -77,7 +77,7 @@ Remote TrashRecord: { trashedAt, workspaceId?, titleSnapshot?, purgePending?: bo
 | --- | --- |
 | `trashSession(id)` | 拒绝已有 purge 凭据；先归档，写 marker 前后校验 A；交错取消归档时删 marker 并抛错；`Promise<void>` |
 | `restoreSession(id)` | 拒绝已有 purge 凭据；先删 marker，再 unarchive；失败且仍归档才补回旧记录；`Promise<void>` |
-| `removeFromTrash(id)` | 先恢复全部已有凭据，再处理指定条目；普通条目必须有 marker 且仍归档；成功 true；purge 阶段失败带阶段，依赖失败保留原错 |
+| `removeFromTrash(id)` | 先恢复全部已有凭据，再处理指定条目；普通条目必须有 marker 且仍归档；首次 stat 明确 undefined 时只清幽灵记录；成功 true；purge 阶段失败带阶段，依赖失败保留原错 |
 | `emptyTrash()` | 先恢复全部凭据，再遍历 marker ids（含待清理诊断）；普通 stale marker 仍受归档门禁；全部成功返回删除数，部分失败继续其它项并抛含成功/失败数及阶段的 AggregateError |
 | `listTrash()` | 全局边界内循环删除不带 purge 且已不归档的 stale marker；返回记录副本，带凭据者只增加 `purgePending`；不写操作日志 |
 
@@ -147,7 +147,7 @@ d-trash/
 1. **原生 UI 选项**：trash 仍在原生归档集合；「显示已归档 / 全部对话」模式仍能显示它，默认隐藏已归档时隐藏。不改原生按钮或过滤规则。
 2. **版本边界**：Workspace facade 类型只承诺读/订阅，实际 model 的 replace 能力已按安装版核实并运行时检查；升级 DSH 需重验。布局导航、Remote、storage 路由已解决，见附录。
 3. **并发边界**：插件队列不约束原生/其它进程；Workspace 跨通道帧可能瞬时闪烁，最终按只读权威基线收敛。写票据只覆盖同一 Client bundle，不是 Host revision 或跨 Client 协议。
-4. **物理删除范围**：仅 JSONL 且有可靠 stat/身份和 backend 兼容互斥。POSIX 要求既有普通锁文件与官方 flock；Windows 同名信号量不要求锁文件。原生支持缺失或身份不可靠均拒绝。macOS 已隔离验证，Windows 待用户原生代跑。
+4. **物理删除范围**：已有日志仅 JSONL 且有可靠 stat/身份和 backend 兼容互斥。首次 stat 明确 undefined 且 marker/归档门禁成立时只清幽灵记录；stat 抛错或 snapshot 不可靠仍拒绝。POSIX 要求既有普通锁文件与官方 flock；Windows 同名信号量不要求锁文件。原生支持缺失或身份不可靠均拒绝。macOS 已隔离验证，Windows 待用户原生代跑。
 5. **崩溃/升级**：覆盖进程崩溃，未增加断电级目录 fsync 事务。unknown-state 可隔离 domain，需重启读取凭据；pending 时不要降级旧版。非法或无凭据暂存不猜测删除。
 6. **派生数据**：投影删除失败为 warning，marker 可能已清掉，后续 purge 不保证自动重试缓存；索引依赖下一次稳定搜索观测的已有同步，不保证即时消失，不手改 SQLite。不额外清理其它插件快照。
 7. **日志**：best effort、固定 4 MiB 阈值与三份归档（下一次追加前轮转，约 16 MiB，非硬上限）；无可靠 stat/source 或磁盘失败时降级 logger，不能当业务凭据或承诺每条必落盘。
@@ -239,11 +239,11 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 
 ### 做法：定位、门禁和固定顺序
 
-1. `stat(id)` 必须返回匹配 header.id、JSONL kind 和绝对日志路径；向上反推 `<home>/sessions/<slug>/<session-dir>`。要求根名 `sessions`、两层结构、canonical home/root/source/log 和真实文件/目录；拒绝 symlink/不可靠路径。不自行推导 cwd slug 或原会话目录编码，**不读环境变量 DSH_HOME**。下文 `<home>` 均为 stat/source 反推且校验的 home。
+1. `stat(id)` 有 snapshot 时必须匹配 header.id、JSONL kind 和绝对日志路径；向上反推 `<home>/sessions/<slug>/<session-dir>`。要求根名 `sessions`、两层结构、canonical home/root/source/log 和真实文件/目录；拒绝 symlink/不可靠路径。无 purge 凭据的首次 stat 明确返回 undefined，且 stat 前后 marker/归档门禁成立时，跳过日志删除，只清必要记录并记 `logs-absent`；stat 抛错（包括 I/O/ENOENT）、不可靠 snapshot 或后续取锁复核 undefined 仍拒绝。不自行推导 cwd slug 或原会话目录编码，**不读环境变量 DSH_HOME**。下文 `<home>` 均为 stat/source 反推且校验的 home。
 2. 初次删除要求 marker 且仍归档；POSIX 以 `O_RDWR | O_NOFOLLOW` 打开既有普通 `session.lock`，官方 `tryLockExclusive` 独占、不创建/截断。Windows 使用 backend 同名内核信号量，不依赖锁文件或 POSIX addon。locate 只依赖 stat/路径/身份。取锁后复核 stat、realpath、目录和租约、归档门禁。
 3. 建立同设备兄弟目录 `<home>/sessions.trash-purge-staging`，拒绝 symlink/跨设备；持锁先把 source/target/dev/ino/deleting/logsDeleted 保存进 marker，失败不迁移；然后再次校验 stat/realpath/inode 和门禁。
 4. **写租约 → 复核 → 持久 intent → 最后复核 → 整体 rename → close → rm 暂存 → detach 含目标 id 的各工作区 → unarchive → 删 marker → 尝试清投影缓存**。暂存名 `<encodeURIComponent(id)>-<uuid>` 只用于新 target。持锁不得 unlink 锁文件；POSIX close 关闭被 rename 的同一 inode；Windows 释放原路径信号量，暂存恢复同时检查 source/target 信号量，再释放后删除。
-5. detach 逐所属工作区尝试并汇总失败；不调用/记录非成员 no-op。必要记录清理失败保留凭据；成功后清 marker，投影失败仅 warning。投影清理显式使用 deleteStaged 返回的已验证 home，不回到环境变量。
+5. detach 逐所属工作区尝试并汇总失败；不调用/记录非成员 no-op。有日志的必要记录清理失败保留凭据；成功后清 marker，投影失败仅 warning。投影清理显式使用 deleteStaged 返回的已验证 home，幽灵分支复用已校验的 stat/source home（或其它可靠会话定位）；无可靠 home 时 warning，日志降级 logger，不回到环境变量。
 
 ### 做法：凭据与恢复
 
@@ -266,7 +266,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 | emptyTrash | 逐条 purge 阶段 + complete；一条 summary 含成功/失败数，零条也记录 |
 | recovery | 每个凭据的阶段与 recovery 结果（deleted/unmoved/failed） |
 
-成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`；detach 按实际尝试的所属工作区记，零归属不产生 detach 行。阶段失败按实际位置记录，projection 为 warning；已有字段与路径不变，日志行数不固定。
+成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`，幽灵记录独立使用 `logs-absent/ok` 并注明 stat undefined、日志已不存在、只清记录；detach 按实际尝试的所属工作区记，零归属不产生 detach 行。阶段失败按实际位置记录，projection 为 warning；已有字段与路径不变，日志行数不固定。
 
 操作前预定位并缓存 home；source 移走后复用已打开 marker 的 source；否则用目标 stat、其它 marker 或 persistence.list 候选再 stat。无可靠凭据/stat 时降级 logger，不猜路径。新目录 0700，日志文件 0600 且每次打开收紧，现有 logs 目录权限不改；拒绝 home/logs symlink、文件 symlink/非普通文件；O_APPEND、不截断，同进程按路径共享串行队列。每条等待追加完成，失败降级 ctx.logger.info（带原记录及 logError）；降级也失败则吞掉，后续可重试，不改变主操作结果。固定常量 MAX_BYTES=4 MiB、KEEP=3，超过阈值后在下一次追加前删除 .3、逆序改名并新建 0600 活动文件；轮转自身写 log-rotate 记录，失败只降级 logger，原业务结果不变。跨进程旧句柄可继续写轮转文件使 .1 偏大，不承诺跨进程强一致或 fsync，日志不充当业务提交凭据。详见下方日志轮转交付章节。
 
@@ -415,3 +415,26 @@ Windows 自检命令和预期通过/跳过数见 docs/DETAIL.md 的 Windows self
 
 不改 DSH 核心/profile、不 install_bundle、不操作真实会话、不发布或推送；不改包身份与物理删除语义。
 不承诺跨进程强一致、硬容量上限或断电事务，不自动清理崩溃残留 guard，不扩大已验证的平台/DSH 版本边界。
+
+## 已删除会话的幽灵记录清理 — 已交付（2026-11-23）
+
+### 目标与范围
+
+修复已物理删除的会话被客户端陈旧列表再次收进后，marker/归档存在而磁盘无日志、再次删除被 gate 拒绝的问题。只调整 Host 首次定位分支及共用记录清理；删除对象、包身份、普通收进/恢复和已有 purge 凭据协议不变。
+
+### 做法
+
+- `locate` 仅把 `stat === undefined` 作为不存在，不吞 stat 抛错、不把无效 snapshot 或文件系统校验错误转成不存在。首次 move 返回 `logs-absent` 前再次检查 marker/归档；后续 locked/intent 复核的 undefined 仍拒绝。
+- 幽灵分支跳过日志锁/intent/rename/rm，写 `logs-absent/ok` 及原因，共用 detach 当前所属工作区 → unarchive → 删 marker → 清投影。成功返回 true，empty 计成功；不存在的目录不生成虚构凭据，必要记录失败按实际阶段报告，普通 marker 仍遵守归档对账规则。
+- stat/source 校验的 home 在 Host 内缓存复用；重启后可从其它可靠会话/凭据定位投影 home。没有可靠 home 时投影仅 warning、日志降级 logger，不读环境变量或猜会话路径。
+- 已有 purge 凭据仍优先校验和恢复；即便 stat 不存在/抛错，也不绕过凭据校验，不自动删除未知暂存。
+
+### 验收标准与结果
+
+新增 `scripts/ghost-regressions.mjs`，接入默认 smoke 和安装版 discovery，18 项在 Node 26.10.0 与 Electron 44.7.0 / Node 24.21.0 / DSH rc.5 各通过一次，均无跳过。覆盖无目录幽灵清理、成功删除后陈旧 re-trash、empty 计数、EIO/抛出的 ENOENT 原错拒绝且磁盘/marker 不变、不可靠 snapshot、marker/归档及交错门禁、取锁后与 intent 后缺失仍拒绝、合法凭据在 stat 抛错时恢复、非法凭据不能走幽灵分支，以及重启 home 定位/无证据降级。
+
+`npm run build`、`npm test`、`npm run test:discovery`、`npm pack --dry-run --json --cache /tmp/d-trash-ghost-npm-cache` 全部退出 0。默认 cache 的首次 pack 因 EPERM 失败，改临时 cache 后通过，未修改用户 cache 权限。Node/Electron 均保留原 37 项文件系统、29 项日志回归；平台各 4 通过、6 项 Windows-only 跳过。discovery 核验官方租约双向互斥、五个 Remote 与四个 slot。打包含新回归脚本且无 CODEX 报告；完整证据见本地 `CODEX_GHOST.md`。
+
+### 明确不做什么
+
+不改 DSH 核心/profile、不 install_bundle、不碰真实会话、不发布或推送；不改包身份、物理删除语义或保留范围，不扩大平台/DSH 验收边界。本轮为合成临时 home 回归，不声称真机 GUI 复验；Windows 原生验收仍待用户代跑。
