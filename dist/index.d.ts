@@ -51,6 +51,10 @@ export default class TrashService extends TypertRemoteService {
      */
     private recoverStaging;
     private purgeSession;
+    /** Both physical and absent-log cleanup reach here only after marker commit.
+     * This is a notification, not a registry mutation or a deletion receipt.
+     */
+    private notifyRemoved;
     /** Reconcile normal markers; retain purge receipts as retryable diagnostics. */
     listTrash(): Promise<Array<[SessionId, TrashRecord]>>;
     private domain;

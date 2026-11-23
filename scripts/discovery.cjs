@@ -325,11 +325,13 @@ async function main() {
   emit('client-Gateway-integration', { namespaceBefore: false, namespaceAfterMount: true,
     slots: [...slots.keys()].sort(), wire: moveWire, namespaceAfterDispose: false })
   await require('./review2fix-regressions.cjs')(installed, emit, evidence)
+  await require('./reappear-evidence.cjs')(installed, emit)
   await import('./platform-regressions.mjs')
   await import('./phase4-regressions.mjs')
   await import('./ghost-regressions.mjs')
   await import('./operation-log-regressions.mjs')
   await import('./deferred-regressions.mjs')
+  await import('./reappear-regressions.mjs')
   assert.deepEqual(hashes(), before, 'Protected documents and real profile files must remain unchanged')
   console.log('PASS: installed resolver, Typert scan/cache, real Loader/ClientModules, Gateway inject reproduction and slot RPC lifecycle; profile unchanged')
 }

@@ -406,6 +406,7 @@ let TrashService = (() => {
                 stage = 'marker';
                 await table.delete(sessionId);
                 await this.report(sessionId, stage, 'ok');
+                await this.notifyRemoved(sessionId);
                 try {
                     await this.purger.clearProjection(sessionId, home ?? await this.logHome(sessionId));
                     await this.report(sessionId, 'projection', 'ok');
@@ -434,6 +435,19 @@ let TrashService = (() => {
                 }
                 throw failure;
             }
+        }
+        /** Both physical and absent-log cleanup reach here only after marker commit.
+         * This is a notification, not a registry mutation or a deletion receipt.
+         */
+        async notifyRemoved(sessionId) {
+            try {
+                this.ctx.emit('api-session/removed', sessionId);
+            }
+            catch (error) {
+                await this.report(sessionId, 'removed', 'warning', error);
+                return;
+            }
+            await this.report(sessionId, 'removed', 'ok');
         }
         /** Reconcile normal markers; retain purge receipts as retryable diagnostics. */
         async listTrash() {

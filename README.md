@@ -63,6 +63,8 @@ Permanent deletion requires a validated JSONL session path and matching filesyst
 
 If a stale Client list moves an already deleted session back to Trash, a first `stat` returning exactly `undefined` allows record cleanup while its marker exists and it remains archived. The Host skips log deletion, detaches current owning workspaces, unarchives, removes the marker, and attempts projection cleanup; delete returns `true`, and empty counts it as a success. Audit stage `logs-absent` explains this case. A thrown `stat` error (including I/O errors), a mismatched header id, a non-JSONL snapshot, or a relative/missing location still refuses cleanup. Existing purge receipts always follow receipt validation and recovery. Projection cleanup uses a previously validated stat/source home or another reliable session; without one it records a warning, and audit logging falls back to the Host logger.
 
+After physical deletion or ghost cleanup commits the marker removal, the Host best-effort emits the public `api-session/removed(sessionId)` event. The verified installed rc.5 Host transport forwards it to the real Client catalog, removing the stale row that would otherwise reappear under Ungrouped. Failed or queued deletion never sends it; notification errors only record `removed/warning` and preserve deletion success.
+
 See [DETAIL.md](./docs/DETAIL.md) and [PLAN.md](./PLAN.md) for the full protocol and recovery boundaries.
 
 ## Compatibility
@@ -82,6 +84,7 @@ Peer ranges allow compatible updates; they do not mean later DSH versions have b
 
 ## Known limitations
 
+- Client removal notifications are best effort and are not replayed after disconnection. `removed/ok` confirms local emission, not Client receipt; an earlier throwing Host listener can prevent forwarding. The official catalog re-reads on reconnect. Native later re-additions, retained subagent lineage, and search synchronization remain DSH-owned. The new transport/catalog probe uses installed rc.5 with synthetic data; no GUI or Windows acceptance is claimed.
 - Loaded/entered sessions can remain locked by DSH. Delete/Empty queues lock-busy sessions without changing their logs, archive state, or workspace membership. Restart DSH to let the Host retry automatically; if a session is still busy it stays queued for the next restart, and Delete forever can also retry manually. Startup maintenance runs in the background, retries unavailable services with backoff, and reports other errors by stage. There is no public unload/close API; the plugin never releases another owner’s handle, bypasses a lease, unlinks a live lock file, or steals a lock.
 - Attachments, workspace files, Git worktrees, artifacts, server logs, backups, and other plugins' snapshots remain.
 - Deletion is not secure erasure. Search results may take time to converge through DSH's existing synchronization; cache cleanup failures are warnings.

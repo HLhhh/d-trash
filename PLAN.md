@@ -1,6 +1,6 @@
 # d-trash（回收站）方案
 
-> **已交付**：第 0–4 期及评审修复、持久化操作日志（2026-11-22）。既有真机验收已通过：第 2 期入口和第 4 期两个会话的物理清理；详见本文验收记录。
+> **已交付**：第 0–4 期及评审修复、持久化操作日志（2026-11-22）；删除完成后的 Client 目录移除通知（2026-11-23，见末尾交付小节）。既有真机验收已通过：第 2 期入口和第 4 期两个会话的物理清理；详见本文验收记录。
 > 本次开源整理只改插件项目、运行隔离验证；没有安装/重载 bundle、修改核心/profile、启动 web server 或操作真实会话，不代表本轮完成真机复验。
 > 形态：DSH Host + Client bundle；包 `d-trash`，版本 `0.1.0`；插件 id / 服务 / Remote namespace / 面板 id 与 key 均为 `trash`。
 
@@ -153,7 +153,8 @@ d-trash/
 6. **派生数据**：投影删除失败为 warning，marker 可能已清掉，后续 purge 不保证自动重试缓存；索引依赖下一次稳定搜索观测的已有同步，不保证即时消失，不手改 SQLite。不额外清理其它插件快照。
 7. **日志**：best effort、固定 4 MiB 阈值与三份归档（下一次追加前轮转，约 16 MiB，非硬上限）；无可靠 stat/source 或磁盘失败时降级 logger，不能当业务凭据或承诺每条必落盘。
 8. **原生重建**：写租约只证明当前写者排他（POSIX inode / Windows 同名信号量），不能禁止 rename 后原生重建 source；恢复/记录清理发现替代 source 会拒绝，不承诺跨进程维护事务。成员检查同样不锁住原生归属变动。
-9. **已加载会话**：lock-busy 改为持久排队，重启 DSH 后后台自动重试；仍 busy 保留到下次启动。恢复排队项只取消排队并保留归档，也可手动再次删除。服务/存储未就绪时退避重试；不保证抢在原生会话加载前拿锁。官方无公开卸载/close API，绝不绕锁、unlink 活锁文件、夺锁或释放其它服务的句柄。
+9. **Client 目录通知**：物理删除或幽灵记录清理完成、marker 删除成功后才 emit 公开 `api-session/removed(id)`，失败/排队/仅暂存恢复不发。`removed/ok` 只代表本地 emit 未抛错，不是 Client 回执；抛错仅 warning。单向事件不重放，断线、事件监听器提前抛错或原生并发重新加入仍可能留下短暂陈旧行；重连的官方 catalog 全量读取负责修复，不调用私有卸载/刷新接口。本轮安装版 rc.5 真实事件链路隔离验证不代表 GUI/Windows 真机验收。
+10. **已加载会话**：lock-busy 改为持久排队，重启 DSH 后后台自动重试；仍 busy 保留到下次启动。恢复排队项只取消排队并保留归档，也可手动再次删除。服务/存储未就绪时退避重试；不保证抢在原生会话加载前拿锁。官方无公开卸载/close API，绝不绕锁、unlink 活锁文件、夺锁或释放其它服务的句柄。
 
 ### 验收标准与结果
 
@@ -244,7 +245,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 1. `stat(id)` 有 snapshot 时必须匹配 header.id、JSONL kind 和绝对日志路径；向上反推 `<home>/sessions/<slug>/<session-dir>`。要求根名 `sessions`、两层结构、canonical home/root/source/log 和真实文件/目录；拒绝 symlink/不可靠路径。无 purge 凭据的首次 stat 明确返回 undefined，且 stat 前后 marker/归档门禁成立时，跳过日志删除，只清必要记录并记 `logs-absent`；stat 抛错（包括 I/O/ENOENT）、不可靠 snapshot 或后续取锁复核 undefined 仍拒绝。不自行推导 cwd slug 或原会话目录编码，**不读环境变量 DSH_HOME**。下文 `<home>` 均为 stat/source 反推且校验的 home。
 2. 初次删除要求 marker 且仍归档；POSIX 以 `O_RDWR | O_NOFOLLOW` 打开既有普通 `session.lock`，官方 `tryLockExclusive` 独占、不创建/截断。Windows 使用 backend 同名内核信号量，不依赖锁文件或 POSIX addon。locate 只依赖 stat/路径/身份。取锁后复核 stat、realpath、目录和租约、归档门禁。
 3. 建立同设备兄弟目录 `<home>/sessions.trash-purge-staging`，拒绝 symlink/跨设备；持锁先把 source/target/dev/ino/deleting/logsDeleted 保存进 marker，失败不迁移；然后再次校验 stat/realpath/inode 和门禁。
-4. **写租约 → 复核 → 持久 intent → 最后复核 → 整体 rename → close → rm 暂存 → detach 含目标 id 的各工作区 → unarchive → 删 marker → 尝试清投影缓存**。暂存名 `<encodeURIComponent(id)>-<uuid>` 只用于新 target。持锁不得 unlink 锁文件；POSIX close 关闭被 rename 的同一 inode；Windows 释放原路径信号量，暂存恢复同时检查 source/target 信号量，再释放后删除。
+4. **写租约 → 复核 → 持久 intent → 最后复核 → 整体 rename → close → rm 暂存 → detach 含目标 id 的各工作区 → unarchive → 删 marker → best-effort removed 通知 → 尝试清投影缓存**。暂存名 `<encodeURIComponent(id)>-<uuid>` 只用于新 target。持锁不得 unlink 锁文件；POSIX close 关闭被 rename 的同一 inode；Windows 释放原路径信号量，暂存恢复同时检查 source/target 信号量，再释放后删除。
 5. detach 逐所属工作区尝试并汇总失败；不调用/记录非成员 no-op。有日志的必要记录清理失败保留凭据；成功后清 marker，投影失败仅 warning。投影清理显式使用 deleteStaged 返回的已验证 home，幽灵分支复用已校验的 stat/source home（或其它可靠会话定位）；无可靠 home 时 warning，日志降级 logger，不回到环境变量。
 
 ### 做法：凭据与恢复
@@ -268,7 +269,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 | emptyTrash | 逐条 purge 阶段 + complete；一条 summary 含成功/失败数，零条也记录 |
 | recovery | 每个凭据的阶段与 recovery 结果（deleted/unmoved/failed） |
 
-成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`，幽灵记录独立使用 `logs-absent/ok` 并注明 stat undefined、日志已不存在、只清记录；detach 按实际尝试的所属工作区记，零归属不产生 detach 行。阶段失败按实际位置记录，projection 为 warning；已有字段与路径不变，日志行数不固定。
+成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/removed/projection`，幽灵记录独立使用 `logs-absent/ok` 并注明 stat undefined、日志已不存在、只清记录；detach 按实际尝试的所属工作区记，零归属不产生 detach 行。阶段失败按实际位置记录，projection 为 warning；已有字段与路径不变，日志行数不固定。
 `unlocked/ok` 仅在已取得租约且 release 成功后写入；取锁失败无 locked/unlocked，当前 lock-busy 顺序为 gate/ok → lock/failed → deferred/ok → complete/deferred；排队写入失败则 deferred/failed → complete/failed。
 
 操作前预定位并缓存 home；source 移走后复用已打开 marker 的 source；否则用目标 stat、其它 marker 或 persistence.list 候选再 stat。无可靠凭据/stat 时降级 logger，不猜路径。新目录 0700，日志文件 0600 且每次打开收紧，现有 logs 目录权限不改；拒绝 home/logs symlink、文件 symlink/非普通文件；O_APPEND、不截断，同进程按路径共享串行队列。每条等待追加完成，失败降级 ctx.logger.info（带原记录及 logError）；降级也失败则吞掉，后续可重试，不改变主操作结果。固定常量 MAX_BYTES=4 MiB、KEEP=3，超过阈值后在下一次追加前删除 .3、逆序改名并新建 0600 活动文件；轮转自身写 log-rotate 记录，失败只降级 logger，原业务结果不变。跨进程旧句柄可继续写轮转文件使 .1 偏大，不承诺跨进程强一致或 fsync，日志不充当业务提交凭据。详见下方日志轮转交付章节。
@@ -492,3 +493,37 @@ Client 覆盖精确前缀的 RemoteResult/跨 realm transport 路径、双语行
 
 不绕过写锁、不 unlink 活锁文件、不夺锁、不调用私有卸载 API；不改 DSH 核心/profile、不 install_bundle、不碰真实会话、不发布或推送。
 不扩大删除/保留范围，不把排队当 purge 凭据，不在启动恢复无排队的既有 purge 凭据，不保证原生加载前抢先完成或跨服务事务。
+
+
+## 物理删除后 Client 会话重新显示修复 — 已交付（2026-11-23）
+
+### 目标与范围
+
+修复日志、归属、归档和 marker 已清除后，Client catalog 仍保留行而被侧栏「未分组」渲染的问题。仅补 Host 完成通知、隔离回归及文档；包身份 d-trash、内部 trash、domain version 1、删除门禁/排队与保留范围不变。
+
+### 安装版只读实证
+
+使用安装版 DSH 0.2.2-rc.5 / Electron 44.7.0 的 ASAR-aware fs，只读其源码：
+
+- `dsh-api-session-controller/src/types.ts:686–691` 声明公开 emit 事件；Host `src/index.ts:227–228` 在 session/disposed 时发送它。
+- 真正的应用事件传输由 `dsh-api-remotes` 负责：`src/remote-events.ts:33` 选择 removed，`src/index.ts:41–58` 注册 Gateway 源、通过 ctx.on 收集事件，没有限制只能由 Session Controller 发出。
+- `dsh-api-gateway/src/index.ts:598–635` 消费并广播 `{ type: 'emit', event, args }`；Client `src/client/remote-events.ts:115–154` 解析帧并分发订阅。
+- Session Controller Client `src/client/index.ts:116–117` 注册 `$on`，`sessions/service.ts:410–411` 转交真实 manager，`sessions/manager.ts:684–699` 对普通会话记录 remove；service 将结果投影到 list.ids/byId。`session-wire-event.ts` 校验日志事件，不是本通知的消费路径。
+- `dsh-client-ui-workspace/src/client/tree.ts:324–367` 从 list.ids/byId 选无工作区成员的可见行生成 UNGROUPED_KEY；`rows/Rows.tsx:289` 与 locales 的 group.ungrouped 渲染「未分组 / Ungrouped」（用户描述的「未归属」）。目录行删除后不再进入分组。
+
+### 做法
+
+Host 的两条成功分支共用 `purgeSession`：确认日志已删除或首次 stat 明确 undefined → detach 实际成员 → unarchive → 删 marker → `ctx.emit('api-session/removed', sessionId)` → 尝试清投影。通知只在 marker 删除成功后调用，事件监听器同步抛错隔离为 `removed/warning`，删除返回值、empty 计数与 complete/ok 保持成功；正常记 removed/ok。既有日志阶段相对顺序保持，增加 marker 和 projection 之间的 removed；无接收回执，不宣称可靠投递。
+
+采用已核实的公开事件和精确签名的局部类型桥，不注册另一份事件所有权、不增加 controller 运行时依赖；不直接改 Client catalog、不改核心。任何删除失败或 deferred、普通 restore/list/trash、仅完成暂存日志恢复仍保留 marker 时均不发。稍后显式删除完成或启动排队删除完成才发。
+
+### 验收标准与结果
+
+- `scripts/reappear-regressions.mjs` 接入 npm test/discovery：14 个合成临时 home 场景，覆盖物理/幽灵成功时机、detach/unarchive/marker 失败与重试、监听器抛错、gate/stat/intent/rm 失败、只恢复日志不发、排队/恢复取消/启动完成、混合 empty 及通知/投影 warning 不改变成功计数。
+- `scripts/reappear-evidence.cjs` 在 discovery 串起安装版真实 Host API Remotes + Gateway wireStream、ClientRemoteEvents 事件泵、Session Controller Client apply/ClientSessions/SessionManager、ClientWorkspaceModel 与 deriveGroups。物理和幽灵分支均延迟 removed 帧：完成删除后、送达前 ids 与未分组仍有 a；送达后 ids/byId/未分组行均消失且订阅通知。失败与真实租约排队均无 removed 帧、catalog 保留行。
+- 仅通用浏览器 snapshot/notify 工具（安装包无可解析模块）和进程内 JSON carrier 为 seam；业务 catalog、事件选择/转发/消费、删除及侧栏分组均执行安装版代码。源码指纹随 discovery 输出，不是仅检查字符串或自造 catalog。
+- 本轮 `npm run build`、`npm test`、安装版 `npm run test:discovery`、`npm pack --dry-run --json --cache /tmp/d-trash-reappear-npm-cache` 均退出 0。Node 26.10.0 与 Electron 44.7.0 / Node 24.21.0 / DSH rc.5 均通过新增 14 项及既有 37 项文件系统、30 项日志、18 项幽灵、13 项排队回归；平台各 4 通过、6 项 Windows-only 明确跳过。discovery 的四条 catalog 实证通过，官方锁双向互斥、五个 Remote、四个 slot 仍通过。pack 含 71 文件与两个新脚本，无 CODEX 报告。详细结果及剩余边界记录于本地 `CODEX_REAPPEAR.md`；不将既有真机验收算作本轮复验。
+
+### 明确不做什么与剩余边界
+
+不改 DSH 核心/profile、不 install_bundle、不碰真实会话、不推送/发布；不使用私有接口，不卸载 Host/Client 会话，不绕锁、不改 deferred、不新增持久 schema。单向通知 best effort、不重放：连接中断、较早的 Host 监听器抛错可能阻断下发；重连由官方 catalog 全量读取收敛，原生后续 re-add/重建不属于本通知能禁止的行为。普通会话行移除不等于销毁所有驻留实例；subagent 的 lineage 保留逻辑仍由官方 manager 控制。搜索/缓存限制保持。本轮无 React renderer、真实 profile GUI 或 Windows 原生复验，新增链路证据限安装版 rc.5，不扩大已验证版本边界。

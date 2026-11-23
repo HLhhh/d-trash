@@ -18,6 +18,12 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+// Public Session Controller signature verified in installed rc.5. A narrow
+// type bridge avoids a runtime controller dependency or claiming event ownership.
+interface SessionRemovalEmitter {
+  emit(event: 'api-session/removed', sessionId: SessionId): void
+}
+
 interface StoredTrashRecord extends TrashRecord { purge?: PurgeIntent; deferredAt?: number }
 
 const trashDomain = defineDomain({
@@ -337,6 +343,7 @@ export default class TrashService extends TypertRemoteService {
       stage = 'marker'
       await table.delete(sessionId)
       await this.report(sessionId, stage, 'ok')
+      await this.notifyRemoved(sessionId)
       try { await this.purger.clearProjection(sessionId, home ?? await this.logHome(sessionId)); await this.report(sessionId, 'projection', 'ok') }
       catch (error) { await this.report(sessionId, 'projection', 'warning', error) }
       return true
@@ -357,6 +364,19 @@ export default class TrashService extends TypertRemoteService {
       }
       throw failure
     }
+  }
+
+  /** Both physical and absent-log cleanup reach here only after marker commit.
+   * This is a notification, not a registry mutation or a deletion receipt.
+   */
+  private async notifyRemoved(sessionId: SessionId): Promise<void> {
+    try {
+      (this.ctx as unknown as SessionRemovalEmitter).emit('api-session/removed', sessionId)
+    } catch (error) {
+      await this.report(sessionId, 'removed', 'warning', error)
+      return
+    }
+    await this.report(sessionId, 'removed', 'ok')
   }
 
   /** Reconcile normal markers; retain purge receipts as retryable diagnostics. */

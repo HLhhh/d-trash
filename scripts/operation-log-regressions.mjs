@@ -101,7 +101,7 @@ await test('all successful purge stages persist outside the deleted source', asy
   await f.trash.removeFromTrash('a')
   const log = (await rows(f)).filter(row => row.action === 'removeFromTrash')
   assert.deepEqual(log.map(row => row.stage), ['gate', 'locked', 'recheck', 'intent', 'renamed',
-    'unlocked', 'logs-deleted', 'delete-staged', 'detach', 'unarchive', 'marker', 'projection', 'complete'])
+    'unlocked', 'logs-deleted', 'delete-staged', 'detach', 'unarchive', 'marker', 'removed', 'projection', 'complete'])
   assert.ok(log.every(row => row.sessionId === 'a' && row.result === 'ok' && row.reason === null))
 })
 
@@ -180,7 +180,7 @@ await test('busy delete and empty preserve stable wire marker, cause and data; n
     assert.ok(!log.some(row => row.sessionId === 'a' && (row.stage === 'locked' || row.stage === 'unlocked')))
     assert.deepEqual(log.filter(row => row.action === 'emptyTrash' && row.sessionId === 'b').map(row => row.stage),
       ['gate', 'locked', 'recheck', 'intent', 'renamed', 'unlocked', 'logs-deleted', 'delete-staged',
-        'detach', 'unarchive', 'marker', 'projection', 'complete'])
+        'detach', 'unarchive', 'marker', 'removed', 'projection', 'complete'])
   } finally { await lock.release() }
   assert.equal(await f.trash.removeFromTrash('a'), true)
 })

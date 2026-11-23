@@ -63,6 +63,8 @@ Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为�
 
 客户端陈旧列表可能把已删除的会话再次收进回收站。首次 `stat` 明确返回 `undefined` 时，只有 marker 存在且仍归档才允许清理幽灵记录：跳过日志删除，依次 detach 当前所属工作区、取消归档、删 marker、尝试清投影；删除成功返回 `true`，清空计为成功，并记录 `logs-absent` 阶段及原因。`stat` 抛错（含 I/O 故障）、header.id 不符、非 JSONL、相对路径或缺失 location 仍拒绝清理。已有 purge 凭据始终按原协议校验、恢复。投影清理复用已校验的 stat/source home 或其它可靠会话的 home；无可靠 home 时只记 warning，审计日志降级 Host logger，不猜路径。
 
+物理删除或幽灵清理成功、删 marker 后，Host 会 best-effort 发送公开 `api-session/removed(sessionId)`。已实证安装版 rc.5 的 Host transport 会下发到真实 Client catalog，移除否则会在「未分组」重新显示的陈旧行。失败/排队不发通知；通知异常仅记 `removed/warning`，不改变删除成功结果。
+
 完整协议和恢复边界见 [DETAIL.md](./docs/DETAIL.md) 与 [PLAN.md](./PLAN.md)。
 
 ## 兼容性
@@ -82,6 +84,7 @@ peer 区间允许兼容更新，不代表后续 DSH 版本已验收。升级后�
 
 ## 已知限制
 
+- Client 移除通知为 best effort，断线后不重放；`removed/ok` 仅代表本地 emit 返回，不是客户端回执，较早的 Host 监听器抛错也可能阻断下发。重连由官方 catalog 全量读取修复；原生后续 re-add、subagent lineage 保留和搜索同步仍由 DSH 负责。新增 transport/catalog 隔离探针使用安装版 rc.5 合成数据，不代表 GUI 或 Windows 真机验收。
 - 已加载/已 enter 的会话可能长期由 DSH 持有写租约。删除/清空遇到 lock-busy 会先排队，保留日志、归档和工作区归属；重启 DSH 后 Host 自动重试，若仍 busy 则保留到下次启动，也可手动再次彻底删除。启动扫描在后台执行，服务未就绪时退避重试，其它错误按阶段报告。官方无公开卸载/close API；插件不释放其它所有者的句柄，不绕过租约、不 unlink 活锁文件、不夺锁。
 - 保留附件、工作区文件、Git worktree、产物、服务端日志、备份及其它插件快照。
 - 不承诺安全擦除；搜索结果依赖 DSH 既有同步收敛，不保证立即消失；投影缓存清理失败只记 warning。

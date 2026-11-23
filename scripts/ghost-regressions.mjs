@@ -40,7 +40,7 @@ await test('absent directory cleans ghost ownership, archive, marker and cache i
   assert.equal(await f.trash.removeFromTrash('a'), true)
   await clean(f)
   assert.deepEqual(f.calls, ['detach:0', 'unarchive'])
-  assert.deepEqual(f.logs.map(row => row.stage), ['logs-absent', 'detach', 'unarchive', 'marker', 'projection', 'complete'])
+  assert.deepEqual(f.logs.map(row => row.stage), ['logs-absent', 'detach', 'unarchive', 'marker', 'removed', 'projection', 'complete'])
   const event = (await rows(f)).find(row => row.stage === 'logs-absent')
   assert.equal(event.result, 'ok')
   assert.match(event.reason, /stat returned undefined.*cleaning records only/)

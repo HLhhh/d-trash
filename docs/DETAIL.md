@@ -63,7 +63,7 @@ Host 缓存由 stat/source 校验过的 home，供后续幽灵记录的投影清
 
 执行顺序是写租约 → 复核 → marker 保存 purge intent → 最后复核 → 整体 rename 到
 `$DSH_HOME/sessions.trash-purge-staging/<encoded-id>-<uuid>` → close 释放锁 →
-递归 rm 暂存 → detach 当前包含该 session 的各工作区 → unarchive → 删 marker → 尝试删除投影缓存。
+递归 rm 暂存 → detach 当前包含该 session 的各工作区 → unarchive → 删 marker → best-effort removed 通知 → 尝试删除投影缓存。
 逐工作区检查成员并汇总实际 detach 失败；不调用非成员工作区，不产生其 no-op 日志。
 重试时重新读取成员投影，已完成 detach 的工作区跳过；零归属会话仍正常完成其余清理。
 暂存是 sessions 根的兄弟目录，与 source 的 dev 必须相同；从不在持锁期间 unlink `session.lock`。
@@ -90,6 +90,30 @@ Client 精确识别排队前缀并显示中英「已排队」status，关闭确�
 显示部分成功和可重试的诊断条目。投影缓存失败只记录警告，此时 marker 可能已清除，不保证后续 purge 自动重试缓存。搜索索引依赖下一次稳定搜索观测时的现有同步收敛；已检查的 query API 没有公开 rescan，不调用私有 `_reconcile` 或直接编辑 SQLite。
 附件、工作区文件、worktree、产物、服务端日志、备份及其它插件扫描快照均保留；不承诺安全擦除或搜索立即消失。
 仅覆盖 JSONL 与进程崩溃，不声称断电事务；有 pending 凭据时不要降级旧版插件。
+
+## 删除完成后移除 Client 目录行
+
+已验证安装版 DSH **0.2.2-rc.5** 的公开 `api-session/removed(sessionId)` 通道：
+`dsh-api-remotes` 的 allowlist/ctx.on → Host Gateway 的 `$events` emit 帧 → Client Gateway 的事件泵/$on →
+Session Controller 的 ClientSessions/SessionManager → catalog 的 ids/byId → Workspace 侧栏分组。
+`session-wire-event.ts` 属于日志事件校验，并不消费这个目录通知。
+
+侧栏按 catalog 行与工作区成员求差集，把无归属的可见会话放入「未分组 / Ungrouped」。
+删除后仅清工作区/归档/marker 和磁盘缓存，不能移除仍驻留在 Client catalog 中的行；取消归档会让它重新可见。
+Host 现在在物理删除或幽灵清理成功、**删 marker 之后** best-effort 发出 removed，再尝试清投影缓存。
+成功记 `removed/ok`；emit 的同步异常仅记 `removed/warning`，不改变删除结果、empty 成功数或 complete/ok。
+这不是 Host registry 卸载操作；没有调用私有接口或直接修改 Client catalog。
+
+失败、排队、普通恢复/读取/收进及仅恢复暂存日志但尚未清 marker 的路径不发；稍后实际完成删除才发。
+`removed/ok` 表示本地 emit 正常返回，不是 Client 收讫。较早的 Host 监听器抛错可能阻止后续转发；
+单向通知在断线后不重放，重连时官方 Client catalog 的全量读取负责修复。事件不会禁止原生后续 re-add/重建，
+也不销毁所有驻留对象；subagent lineage 保留语义仍归官方 manager。不保证跨通道瞬时无闪烁或搜索立即收敛。
+
+`reappear-evidence.cjs` 运行安装版真实 API Remotes/Gateway、Client 事件泵、ClientSessions/SessionManager、
+Workspace model 和侧栏 deriveGroups：物理/幽灵删除后暂停通知，断言 ids 与未分组仍有目标；送达后 ids/byId 与分组行消失、订阅通知。
+另验证失败/真实锁排队无通知、catalog 保留。仅缺失的通用 browser snapshot/notify 工具与进程内 JSON carrier 是 seam，
+不是自造会话 catalog；源码通过 ASAR 只读、内存转译，不改依赖或核心。14 项 Host 边界回归由 Node 与 discovery 共用。
+这不是 React renderer、真实 profile GUI 或 Windows 原生验收；新增链路证据限安装版 rc.5。详见 [PLAN](../PLAN.md) 交付小节。
 
 ## 排队与启动自动删除（方案 A）
 
@@ -148,7 +172,7 @@ POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并
 | `recovery` | 每条待恢复凭据的阶段与 `recovery` 结果；成功 `deleted` / `unmoved`，失败 `failed` |
 | `log-rotate` | 成功 `complete/ok`；`reason` 含文件序号、保留范围、实际淘汰文件或 none 和阈值；失败按实际步骤（含序号）降级 logger |
 
-purge 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`，幽灵记录使用独立的 `logs-absent`；
+purge 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/removed/projection`，幽灵记录使用独立的 `logs-absent`；
 工作区 detach 每次实际尝试各记一条，不为非成员或零归属伪造 detach 行；日志行数不固定。
 `unlocked/ok` 仅在真正取得租约且 `release()` 成功后写入；取锁失败不产生 `locked` 或 `unlocked` 行。
 lock-busy 排队路径为 `gate/ok → lock/failed → deferred/ok → complete/deferred`，deferred 的 reason 含 busy 原因；排队写入失败则 `deferred/failed → complete/failed`，正常成功的 `renamed → unlocked → logs-deleted` 顺序不变。
@@ -304,7 +328,7 @@ if ($LASTEXITCODE -ne 0) { throw 'pack failed' }
 ```
 
 预期 build 输出 Typert / Client generated/bundled；npm test 输出平台 10 passed/0 skipped、phase4 27 passed/10 skipped、
-日志 27 passed/3 skipped（每个 SKIP 带 POSIX 原因），幽灵记录 18 passed/0 skipped、排队 13 passed/0 skipped，其余 Host/Client/生成器通过，退出码 0。
+日志 27 passed/3 skipped（每个 SKIP 带 POSIX 原因），幽灵记录 18 passed/0 skipped、排队 13 passed/0 skipped，重新显示修复 14 passed/0 skipped，其余 Host/Client/生成器通过，退出码 0。
 无安装版变量时 discovery 明确输出 SKIP，不算 discovery 通过。若已安装 DSH，可仅设置以下两个路径再运行；
 runner 负责 ELECTRON_RUN_AS_NODE、等待 GUI 子系统 Electron 退出和转发输出，无需修改 profile：
 
