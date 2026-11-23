@@ -18,7 +18,7 @@ export declare class PurgeError extends Error {
     readonly stage: string;
     constructor(sessionId: SessionId, stage: string, cause: unknown);
 }
-/** POSIX maintenance only. Never creates/truncates/unlinks a live lock file. */
+/** JSONL maintenance. Never creates/truncates/unlinks a live POSIX lock file. */
 export declare class SessionPurger {
     private readonly observe;
     private readonly report;
@@ -31,11 +31,12 @@ export declare class SessionPurger {
      */
     private roots;
     private locate;
-    /** flock → recheck → durable intent → final gate → whole-directory rename → close. */
+    /** Write lease → recheck → durable intent → final gate → whole-directory rename → close. */
     move(id: SessionId, gate: () => void, save: (intent: PurgeIntent) => Promise<void>): Promise<PurgeIntent>;
     /** Resume only marker intents targeting the sibling staging; never sweep unknown directories. */
     deleteStaged(id: SessionId, intent: PurgeIntent, save: (intent: PurgeIntent) => Promise<void>): Promise<StagedDeletion>;
-    /** Separate method permits failure/crash injection in isolated fixtures. */
+    /** Separate methods permit sharing-violation injection in isolated fixtures. */
+    renameDirectory(source: string, target: string): Promise<void>;
     removeDirectory(target: string): Promise<void>;
     clearProjection(id: SessionId, home: string): Promise<void>;
 }

@@ -3,7 +3,7 @@ interface ArchiveSnapshot {
     readonly archivedSessionIds: readonly SessionId[];
     readonly pinnedSessionIds: readonly SessionId[];
 }
-/** Installed 0.2.2-rc.5 exposes the model itself as workspaces.list. */
+/** Verified 0.2.2-rc.2 and rc.5 expose the model itself as workspaces.list. */
 export interface WorkspaceProjection {
     getSnapshot(): ArchiveSnapshot;
     subscribe(listener: () => void): () => void;

@@ -403,7 +403,9 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
             await disposeRemote()
             throw new Error('Trash Remote namespace was not mounted')
           }
-          const workspaceSync = new WorkspaceSync(ctx.workspaces.list, ctx.remote.workspace)
+          let workspaceSync: WorkspaceSync
+          try { workspaceSync = new WorkspaceSync(ctx.workspaces.list, ctx.remote.workspace) }
+          catch (error) { await disposeRemote(); throw error }
           ctx.effect(() => () => workspaceSync.dispose(), 'trash: Workspace projection sync')
           ctx.effect(() => ctx.locale.register(namespace, copy), 'trash: dictionaries')
           const load = async (): Promise<TrashEntries> => unwrap(await host.listTrash())

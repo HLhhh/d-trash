@@ -17,8 +17,10 @@ export class WorkspaceSync {
     constructor(projection, remote) {
         this.projection = projection;
         this.remote = remote;
-        if (typeof projection.replaceArchived !== 'function' || typeof projection.replacePinned !== 'function') {
-            throw new Error('Trash requires the Workspace model archive projection capability');
+        if (!projection || typeof projection.getSnapshot !== 'function' || typeof projection.subscribe !== 'function'
+            || typeof projection.replaceArchived !== 'function' || typeof projection.replacePinned !== 'function'
+            || !remote || typeof remote.follow !== 'function') {
+            throw new Error('Trash requires Workspace model read/subscribe/replaceArchived/replacePinned and remote.follow capabilities');
         }
         this.observed = signature(projection.getSnapshot());
         this.unsubscribe = projection.subscribe(() => {

@@ -39,7 +39,7 @@ try {
   mkdirSync(join(modules, '@deepseek-ai'), { recursive: true })
   for (const entry of readdirSync(join(root, 'node_modules'))) {
     if (entry === '@deepseek-ai') continue
-    symlinkSync(join(root, 'node_modules', entry), join(modules, entry))
+    symlinkSync(join(root, 'node_modules', entry), join(modules, entry), process.platform === 'win32' ? 'junction' : 'dir')
   }
   for (const name of readdirSync(join(root, 'node_modules', '@deepseek-ai'))) {
     const source = realpathSync(join(root, 'node_modules', '@deepseek-ai', name))
@@ -52,7 +52,7 @@ try {
       mkdirSync(join(target, 'node_modules'))
       writeFileSync(join(target, 'node_modules', 'sentinel'), 'must remain unchanged\n')
     }
-    symlinkSync(target, join(modules, '@deepseek-ai', name), 'dir')
+    symlinkSync(target, join(modules, '@deepseek-ai', name), process.platform === 'win32' ? 'junction' : 'dir')
   }
   const before = snapshot(entities)
   const generated = spawnSync(process.execPath, [join(project, 'scripts', 'generate-typert.mjs')], {

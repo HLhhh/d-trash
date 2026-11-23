@@ -16,7 +16,7 @@ function stageDependency(name, destination) {
     dereference: true,
     filter: path => basename(path) !== 'node_modules',
   })
-  symlinkSync(join(root, 'node_modules'), join(destination, 'node_modules'), 'dir')
+  symlinkSync(join(root, 'node_modules'), join(destination, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir')
 }
 
 try {
@@ -26,9 +26,9 @@ try {
   mkdirSync(join(packageDir, 'src'), { recursive: true })
   cpSync(join(root, 'src', 'index.ts'), join(packageDir, 'src', 'index.ts'))
   cpSync(join(root, 'src', 'types.ts'), join(packageDir, 'src', 'types.ts'))
-  cpSync(join(root, 'src', 'purge.ts'), join(packageDir, 'src', 'purge.ts'))
+  for (const file of ['purge.ts', 'write-lease.ts', 'fs-retry.ts']) cpSync(join(root, 'src', file), join(packageDir, 'src', file))
   cpSync(join(root, 'src', 'operation-log.ts'), join(packageDir, 'src', 'operation-log.ts'))
-  symlinkSync(join(root, 'node_modules'), join(packageDir, 'node_modules'), 'dir')
+  symlinkSync(join(root, 'node_modules'), join(packageDir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir')
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   manifest.exports = {
     '.': { types: './lib/types/index.d.ts', default: './lib/index.js' },

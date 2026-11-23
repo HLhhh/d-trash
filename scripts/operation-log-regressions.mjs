@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { lstat, mkdir, open, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
+import { acquireWriteLease } from '../dist/write-lease.js'
 import { OperationLog } from '../dist/operation-log.js'
 import { fixture } from './phase4-fixture.mjs'
 
@@ -20,8 +21,11 @@ const rows = async f => {
     return row
   })
 }
-let count = 0
+let count = 0, skipped = 0
 async function test(name, run) {
+  if (process.platform === 'win32' && /0700|symlink/.test(name)) {
+    skipped++; console.log(`SKIP: operation-log ${name} (POSIX modes/symlink contract)`); return
+  }
   const f = await fixture()
   try { await run(f); count++; console.log(`PASS: operation-log ${name}`) }
   finally { await f.dispose() }
@@ -84,8 +88,7 @@ for (const stage of ['gate', 'lock', 'recheck', 'intent', 'rename', 'delete-stag
     let lock
     if (stage === 'gate') f.archived.delete('a')
     if (stage === 'lock') {
-      lock = await open(join(f.directory('a'), 'session.lock'), 'r+')
-      await tryLockExclusive(lock.fd)
+      lock = await acquireWriteLease(f.directory('a'))
     }
     if (stage === 'recheck') {
       let reads = 0
@@ -106,7 +109,7 @@ for (const stage of ['gate', 'lock', 'recheck', 'intent', 'rename', 'delete-stag
     try {
       if (stage === 'projection') assert.equal(await f.trash.removeFromTrash('a'), true)
       else await assert.rejects(f.trash.removeFromTrash('a'), new RegExp(`\\[${stage}\\]`))
-    } finally { await lock?.close() }
+    } finally { await lock?.release() }
     const log = await rows(f)
     const failure = log.find(row => row.action === 'removeFromTrash' && row.stage === stage
       && row.result === (stage === 'projection' ? 'warning' : 'failed'))
@@ -220,7 +223,7 @@ await test('concurrent Host operations, logger instances and processes append wi
   assert.equal((await rows(f)).length, 24)
   const writers = Array.from({ length: 4 }, () => new OperationLog(async () => f.home, () => assert.fail('unexpected fallback')))
   const children = [0, 1].map(index => {
-    const child = spawn(process.execPath, [new URL('./phase4-child.mjs', import.meta.url).pathname,
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./phase4-child.mjs', import.meta.url)),
       'audit', f.home, String(index)], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
     let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk })
     return once(child, 'exit').then(([code]) => assert.equal(code, 0, stderr))
@@ -232,4 +235,4 @@ await test('concurrent Host operations, logger instances and processes append wi
   assert.equal(new Set(log.filter(row => row.stage === 'concurrent').map(row => row.reason)).size, 280)
 })
 
-console.log(`PASS: operation-log ${count} isolated persistent JSONL scenarios; no real sessions`)
+console.log(`PASS: operation-log ${count} isolated persistent JSONL scenarios; ${skipped} explicitly skipped; no real sessions`)

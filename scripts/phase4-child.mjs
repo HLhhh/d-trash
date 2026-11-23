@@ -1,6 +1,6 @@
 import { open } from 'node:fs/promises'
 import { once } from 'node:events'
-import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
+import { acquireWriteLease } from '../dist/write-lease.js'
 import { fixture } from './phase4-fixture.mjs'
 import { OperationLog } from '../dist/operation-log.js'
 const [mode, value] = process.argv.slice(2)
@@ -10,11 +10,10 @@ if (mode === 'audit') {
   await Promise.all(Array.from({ length: 60 }, (_, i) =>
     log.write('trashSession', 'synthetic', 'concurrent', 'ok', `child:${process.argv[4]}:${i}`)))
 } else if (mode === 'lock') {
-  const file = await open(value, 'r+')
-  await tryLockExclusive(file.fd)
+  const lease = await acquireWriteLease(value)
   process.stdout.write('LOCKED\n')
   await once(process.stdin, 'data')
-  await file.close()
+  await lease.release()
 } else if (mode === 'crash') {
   const f = await fixture(value)
   f.hooks.report = (id, stage) => {

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
+const { tmpdir } = require('node:os')
 const { createRequire } = require('node:module')
 const { pathToFileURL } = require('node:url')
 const { createHash } = require('node:crypto')
@@ -19,7 +20,7 @@ const { TypertRegistry } = installed('@deepseek-ai/dsh-typert-registry')
 const gateway = installed('@deepseek-ai/dsh-api-gateway/client')
 const root = path.resolve(__dirname, '..')
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-const temporary = fs.realpathSync(fs.mkdtempSync('/private/tmp/trash-discovery-'))
+const temporary = fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), 'trash-discovery-')))
 const contexts = []
 const url = directory => pathToFileURL(directory).href + '/'
 const emit = (check, data) => console.log(JSON.stringify({ check, ...data }))
@@ -41,7 +42,7 @@ function profile(name, linked = true) {
   fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ private: true,
     dependencies: { [manifest.name]: `link:${root}` } }))
   fs.writeFileSync(path.join(directory, 'cordis.yml'), '[]\n')
-  if (linked) fs.symlinkSync(root, path.join(directory, 'node_modules', manifest.name), 'dir')
+  if (linked) fs.symlinkSync(root, path.join(directory, 'node_modules', manifest.name), process.platform === 'win32' ? 'junction' : 'dir')
   return directory
 }
 function resolution(directory) {
@@ -72,6 +73,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve))
 async function main() {
   emit('runtime', { node: process.versions.node, electron: process.versions.electron,
     dsh: installed('@deepseek-ai/dsh/package.json').version })
+  await require('./platform-evidence.cjs')(installed, emit)
   const evidence = await require('./workspace-evidence.cjs')(installed, emit)
   const { ClientWorkspaceModel, visibleSessionIds, WorkspaceController } = evidence
   // Load an existing version-1 trash.json with the installed JSON backend.
@@ -160,8 +162,8 @@ async function main() {
   delete oldManifest.main
   delete oldManifest.exports['./cordis.patch.yml']
   fs.writeFileSync(path.join(variant, 'package.json'), JSON.stringify(oldManifest))
-  fs.symlinkSync(path.join(root, 'dist'), path.join(variant, 'dist'), 'dir')
-  fs.symlinkSync(path.join(root, 'node_modules'), path.join(variant, 'node_modules'), 'dir')
+  fs.symlinkSync(path.join(root, 'dist'), path.join(variant, 'dist'), process.platform === 'win32' ? 'junction' : 'dir')
+  fs.symlinkSync(path.join(root, 'node_modules'), path.join(variant, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir')
   const variantPackages = new PluginPackages(context(), { resolution: resolution(variantDir) })
   const variantHarness = harness(url(variantDir), variantPackages)
   await typertLoader.apply(variantHarness.ctx, { packages: [] })
@@ -174,7 +176,7 @@ async function main() {
   const stale = harness(url(lateDir), latePackages)
   await typertLoader.apply(stale.ctx, { packages: [] })
   assert.equal(stale.registrations.length, 0)
-  fs.symlinkSync(root, path.join(lateDir, 'node_modules', manifest.name), 'dir')
+  fs.symlinkSync(root, path.join(lateDir, 'node_modules', manifest.name), process.platform === 'win32' ? 'junction' : 'dir')
   assert.ok(latePackages.packageOf(manifest.name, url(lateDir)))
   stale.events.get('internal/plugin')({ entry: stale.row })
   await tick()
@@ -323,6 +325,7 @@ async function main() {
   emit('client-Gateway-integration', { namespaceBefore: false, namespaceAfterMount: true,
     slots: [...slots.keys()].sort(), wire: moveWire, namespaceAfterDispose: false })
   await require('./review2fix-regressions.cjs')(installed, emit, evidence)
+  await import('./platform-regressions.mjs')
   await import('./phase4-regressions.mjs')
   await import('./operation-log-regressions.mjs')
   assert.deepEqual(hashes(), before, 'Protected documents and real profile files must remain unchanged')

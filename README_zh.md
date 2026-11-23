@@ -22,7 +22,7 @@ GitHub 主仓 · [Gitee 镜像](https://gitee.com/huang-lin-java/d-trash)
 
 ## 安装
 
-需要 DSH **0.2.2-rc.5**、Node **`^22.19.0 || >=24.0.0`**。仓库包含已构建的 `dist/`。
+支持 DSH **0.2.2-rc.2 与 rc.5**、Node **`^22.19.0 || >=24.0.0`**。仓库包含已构建的 `dist/`。
 
 使用本地 checkout：
 
@@ -58,7 +58,7 @@ Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为�
 
 回收站状态只由 Host 服务写入。普通可观测回收站为 **`marker ∩ archived`**：原生归档不会创建 marker；原生取消归档后会话立即退出交集，Host 下次读取时清理滞留 marker。原生归档、置顶行为不变。
 
-物理删除先校验 JSONL 路径和文件系统身份。Host 对既有 `session.lock` 使用官方独占 `flock`，持久化删除 intent，复核身份，将整个会话目录 rename 到 `sessions` 旁的同设备暂存目录，关闭锁后再删除暂存。之后清理工作区成员、归档和 marker，并尝试清理投影缓存。失败保留持久凭据，下次删除或清空时重试；待清理诊断独立于普通回收站交集展示。
+物理删除先校验 JSONL 路径和文件系统身份。Host 使用与 backend 兼容的写租约：POSIX 对既有 `session.lock` 使用官方 `flock`，Windows 经 Koffi 获取同名内核信号量，持久化删除 intent，复核身份，将整个会话目录 rename 到 `sessions` 旁的同设备暂存目录，关闭锁后再删除暂存。之后清理工作区成员、归档和 marker，并尝试清理投影缓存。失败保留持久凭据，下次删除或清空时重试；待清理诊断独立于普通回收站交集展示。
 
 完整协议和恢复边界见 [DETAIL.md](./docs/DETAIL.md) 与 [PLAN.md](./PLAN.md)。
 
@@ -66,12 +66,14 @@ Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为�
 
 | 组件 | 要求 / 已验证边界 |
 | --- | --- |
-| DSH | 已验证 **0.2.2-rc.5**；DSH peer 声明为 `^0.2.2-rc.5` |
+| DSH | 已完成 **0.2.2-rc.2 / rc.5** 隔离 API、构建、回归矩阵；peer `^0.2.2-rc.2`；安装版 discovery 为 rc.5 |
 | Cordis | peer `^4.1.0` |
-| 原生文件系统支持 | `@deepseek-ai/node-addon-system` peer `^0.1.2` |
+| 原生文件系统支持 | POSIX：`@deepseek-ai/node-addon-system` peer `^0.1.2`；Windows：运行依赖 `koffi` 3.1.1 |
 | Node.js | `^22.19.0 || >=24.0.0` |
-| Host 平台 | 已验证 macOS；删除要求 POSIX 与官方原生 flock 支持；不支持 Windows |
-| 会话 backend | 物理删除仅支持 JSONL；缺锁或路径、身份不可靠时拒绝 |
+| Host 平台 | macOS 隔离回归通过；已实现 Windows，原生 Windows 验收待用户代跑 |
+| 会话 backend | 物理删除仅支持 JSONL；POSIX 要求既有锁文件，Windows 无锁文件要求；路径、身份不可靠或原生互斥不可用时明确拒绝 |
+
+本轮未做 rc.2 Desktop GUI 或 Windows 真机验收。[Windows 自检命令](./docs/DETAIL.md#windows-self-check) 只使用合成临时 home。
 
 peer 区间允许兼容更新，不代表后续 DSH 版本已验收。升级后应复核 Client 工作区投影和原生锁。
 

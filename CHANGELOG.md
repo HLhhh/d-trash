@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Windows write exclusion compatible with JSONL's named kernel semaphore via Koffi 3.1.1, without requiring `session.lock`.
+- Bounded Windows sharing-violation retries with identity/archive checks and durable retry receipts; explicit platform test skips and cross-platform discovery launcher.
+- Packed rc.2/rc.5 API and isolated build/test compatibility matrix, official-lease interoperability probes, and Windows self-check instructions.
+
+### Changed
+
+- DSH peer lower bound is now `^0.2.2-rc.2`; development versions remain pinned to rc.5. No rc.2 Desktop GUI or native Windows acceptance is claimed.
+- Location and audit logging no longer depend on a lock file; POSIX deletion still requires the existing official flock inode. Windows never loads that addon.
+
 ## [0.1.0] - 2026-11-22
 
 ### Added

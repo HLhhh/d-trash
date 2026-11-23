@@ -292,6 +292,13 @@ await assert.rejects(plugin.apply({
   effect() { assert.fail('locale must not register after a failed Remote mount') },
   slots: { inject() { assert.fail('slots must not register after a failed Remote mount') } },
 }), /mount failed/)
+let capabilityRemoteDisposed = false
+await assert.rejects(plugin.apply({
+  remote: { async $mount() { return async () => { capabilityRemoteDisposed = true } }, workspace: {} },
+  get() { return clientRemote.trash }, workspaces: { list: {} },
+  effect() { assert.fail('missing capability must fail before registering UI effects') },
+}), /requires Workspace/)
+assert.equal(capabilityRemoteDisposed, true, 'missing capability must release the mounted Remote')
 assert.equal(dictionaries, null)
 await uiContext.fiber.dispose()
 await ctx.fiber.dispose()
@@ -301,5 +308,6 @@ console.log('PASS: Host registration/lifecycle, 5 Remote codecs, named wire disp
 await import('./host-regressions.mjs')
 await import('./generator-regressions.mjs')
 
+await import('./platform-regressions.mjs')
 await import('./phase4-regressions.mjs')
 await import('./operation-log-regressions.mjs')

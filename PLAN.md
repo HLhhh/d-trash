@@ -35,7 +35,7 @@
 - Domain：`storageDomain.open(defineDomain(...))`，懒打开且共享首次请求；打开失败清缓存允许重试；卸载等待已接纳操作后关闭 domain。schema 用 zod，domain version 仍为 1。
 - 生成器固定为 `0.2.2-rc.5`，在临时目录读取精确依赖源码；解引用后复制，不改依赖实体/链接。生成 Host 描述、Remote contribution/codecs 与声明；esbuild 将后者和 locale 字典内联到经典 Client 脚本。
 - 包导出 `.`、`./client`、`./types`、`./typert`、`./remote`、`./locale/*.json`、`./icon`、manifest、patch；`files` 包含 dist、src、scripts、tsconfig、locale、icon、patch、docs、PLAN、双语 README、LICENSE 和 CHANGELOG。`meta.detail` 指向 `docs/DETAIL.md`。本地目录安装链接 checkout，packed 文件清单另行核验；本轮不安装。
-- 运行依赖 zod 4.6.6；Cordis peer ^4.1.0、DSH peers ^0.2.2-rc.5、官方 node-addon-system peer ^0.1.2；开发依赖保持精确版本；不在 Client 运行时 require DSH 内部包。
+- 运行依赖 zod 4.6.6 与 koffi 3.1.1；Cordis peer ^4.1.0、DSH peers ^0.2.2-rc.2、官方 node-addon-system peer ^0.1.2；开发依赖保持精确版本；不在 Client 运行时 require DSH 内部包。
 
 ### 0.2 已核实的 DSH 事实与使用边界
 
@@ -91,7 +91,7 @@ Remote TrashRecord: { trashedAt, workspaceId?, titleSnapshot?, purgePending?: bo
 Host: TrashService（唯一 marker 写入者、五个 Remote、session 队列/全局边界）
  ├─ storageDomain: marker + purge receipt
  ├─ workspaceRegistry: archive/unarchive + 所属工作区 detach
- ├─ SessionPurger: stat/realpath/dev/ino → flock → rename → close → rm / recovery / cache
+ ├─ SessionPurger: stat/realpath/dev/ino → backend 兼容写租约 → rename → close → rm / recovery / cache
  └─ OperationLog: stat/source 定位 home → logs/trash.log（best effort）
                      ↑ Typert positional methods / named wire args
 Client: ModuleLoader 惰性 React 工厂（$mount 后 ctx.get('remote.trash')）
@@ -120,7 +120,8 @@ d-trash/
 ├── cordis.patch.yml            # insert id=trash, name=d-trash
 ├── src/
 │   ├── index.ts                # TrashService、domain、补偿/队列/Remote、purge 编排
-│   ├── purge.ts                # SessionPurger、路径/身份门禁、官方 flock、暂存/恢复/删除
+│   ├── purge.ts                # SessionPurger、路径/身份门禁、跨平台租约、暂存/恢复/删除
+│   ├── write-lease.ts / fs-retry.ts # POSIX flock / Windows 同名信号量、路径校验/有界重试
 │   ├── operation-log.ts        # JSONL 记录与 O_APPEND 队列、降级 logger
 │   ├── types.ts                # 公开 TrashRecord（不含 purge 路径）
 │   ├── client.ts               # 惰性 React 工厂、slots、共享调用层
@@ -146,11 +147,11 @@ d-trash/
 1. **原生 UI 选项**：trash 仍在原生归档集合；「显示已归档 / 全部对话」模式仍能显示它，默认隐藏已归档时隐藏。不改原生按钮或过滤规则。
 2. **版本边界**：Workspace facade 类型只承诺读/订阅，实际 model 的 replace 能力已按安装版核实并运行时检查；升级 DSH 需重验。布局导航、Remote、storage 路由已解决，见附录。
 3. **并发边界**：插件队列不约束原生/其它进程；Workspace 跨通道帧可能瞬时闪烁，最终按只读权威基线收敛。写票据只覆盖同一 Client bundle，不是 Host revision 或跨 Client 协议。
-4. **物理删除范围**：仅 POSIX JSONL 且有可靠 stat 和官方 flock；会话日志没有 delete API 不再意味着只能逻辑移除。非 JSONL、Windows、缺锁/不可靠身份均拒绝。
+4. **物理删除范围**：仅 JSONL 且有可靠 stat/身份和 backend 兼容互斥。POSIX 要求既有普通锁文件与官方 flock；Windows 同名信号量不要求锁文件。原生支持缺失或身份不可靠均拒绝。macOS 已隔离验证，Windows 待用户原生代跑。
 5. **崩溃/升级**：覆盖进程崩溃，未增加断电级目录 fsync 事务。unknown-state 可隔离 domain，需重启读取凭据；pending 时不要降级旧版。非法或无凭据暂存不猜测删除。
 6. **派生数据**：投影删除失败为 warning，marker 可能已清掉，后续 purge 不保证自动重试缓存；索引依赖下一次稳定搜索观测的已有同步，不保证即时消失，不手改 SQLite。不额外清理其它插件快照。
 7. **日志**：best effort、无轮转/大小阈值/保留策略；无可靠 stat/source 或磁盘失败时降级 logger，不能当业务凭据或承诺每条必落盘。
-8. **原生重建**：flock 只证明该锁 inode 当前独占，不能禁止 rename 后原生重建 source；恢复/记录清理发现替代 source 会拒绝，不承诺跨进程维护事务。成员检查同样不锁住原生归属变动。
+8. **原生重建**：写租约只证明当前写者排他（POSIX inode / Windows 同名信号量），不能禁止 rename 后原生重建 source；恢复/记录清理发现替代 source 会拒绝，不承诺跨进程维护事务。成员检查同样不锁住原生归属变动。
 
 ### 验收标准与结果
 
@@ -239,9 +240,9 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 ### 做法：定位、门禁和固定顺序
 
 1. `stat(id)` 必须返回匹配 header.id、JSONL kind 和绝对日志路径；向上反推 `<home>/sessions/<slug>/<session-dir>`。要求根名 `sessions`、两层结构、canonical home/root/source/log 和真实文件/目录；拒绝 symlink/不可靠路径。不自行推导 cwd slug 或原会话目录编码，**不读环境变量 DSH_HOME**。下文 `<home>` 均为 stat/source 反推且校验的 home。
-2. 初次删除要求 marker 且仍归档；以 `O_RDWR | O_NOFOLLOW` 打开既有 `session.lock`，不创建/截断；官方 `tryLockExclusive` 非阻塞独占。取锁后复核 stat、realpath、目录和锁 dev/ino、归档门禁。
+2. 初次删除要求 marker 且仍归档；POSIX 以 `O_RDWR | O_NOFOLLOW` 打开既有普通 `session.lock`，官方 `tryLockExclusive` 独占、不创建/截断。Windows 使用 backend 同名内核信号量，不依赖锁文件或 POSIX addon。locate 只依赖 stat/路径/身份。取锁后复核 stat、realpath、目录和租约、归档门禁。
 3. 建立同设备兄弟目录 `<home>/sessions.trash-purge-staging`，拒绝 symlink/跨设备；持锁先把 source/target/dev/ino/deleting/logsDeleted 保存进 marker，失败不迁移；然后再次校验 stat/realpath/inode 和门禁。
-4. **flock → 复核 → 持久 intent → 最后复核 → 整体 rename → close → rm 暂存 → detach 含目标 id 的各工作区 → unarchive → 删 marker → 尝试清投影缓存**。暂存名 `<encodeURIComponent(id)>-<uuid>` 只用于新 target。持锁不得 unlink 锁文件；close 关闭的是被 rename 的同一 inode，暂存删除前也检查锁并释放。
+4. **写租约 → 复核 → 持久 intent → 最后复核 → 整体 rename → close → rm 暂存 → detach 含目标 id 的各工作区 → unarchive → 删 marker → 尝试清投影缓存**。暂存名 `<encodeURIComponent(id)>-<uuid>` 只用于新 target。持锁不得 unlink 锁文件；POSIX close 关闭被 rename 的同一 inode；Windows 释放原路径信号量，暂存恢复同时检查 source/target 信号量，再释放后删除。
 5. detach 逐所属工作区尝试并汇总失败；不调用/记录非成员 no-op。必要记录清理失败保留凭据；成功后清 marker，投影失败仅 warning。投影清理显式使用 deleteStaged 返回的已验证 home，不回到环境变量。
 
 ### 做法：凭据与恢复
@@ -278,7 +279,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 
 ### 明确不做什么
 
-不新增物理删除对象或绕过门禁；不清附件、workspace/worktree/产物、服务端日志、备份和其它插件快照；不安全擦除、不手改 SQLite/调用私有 reconcile、不承诺即时搜索消失。不新增 Windows/其它 backend、跨进程事务或断电级恢复；不自动清理无凭据残留。本次不安装、不改 profile/核心、不启动服务、不操作真实会话。
+不新增物理删除对象或绕过门禁；不清附件、workspace/worktree/产物、服务端日志、备份和其它插件快照；不安全擦除、不手改 SQLite/调用私有 reconcile、不承诺即时搜索消失。第 4 期未新增 Windows（后续平台兼容章节已扩展）；不新增其它 backend、跨进程事务或断电级恢复；不自动清理无凭据残留。本次不安装、不改 profile/核心、不启动服务、不操作真实会话。
 
 ## 附录：原开放点处理与待确认项
 
@@ -291,7 +292,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 | sidebar 与 main 联动 | **已解决**：四个 slot 注册与 id/key 配对已通过 discovery，既有面板删除验收通过 |
 | TS / Client external | **已解决**：tsc + Typert + esbuild；经典脚本内联 codecs/字典，只有工厂中的 React 从浏览器模块表获取，不设置 dsh.client.external |
 
-**待确认（未实施的行为扩展，不阻塞当前交付）**：若后续需要日志轮转/保留策略、搜索立即收敛/显式 rescan、Windows/其它持久化 backend、跨 Client revision、断电级 fsync 或无凭据残留管理，需先确认范围与官方能力，再修改方案和代码。本次未将任何一项视为授权。
+**待确认（未实施的行为扩展，不阻塞当前交付）**：若后续需要日志轮转/保留策略、搜索立即收敛/显式 rescan、其它持久化 backend、跨 Client revision、断电级 fsync 或无凭据残留管理，需先确认范围与官方能力，再修改方案和代码。本次未将任何一项视为授权。
 
 ## 变更记录（压缩保留关键决策）
 
@@ -346,3 +347,38 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 ### 明确不做什么
 
 不改内部 id 或存储 schema，不迁移/读取真实 marker，不执行真实会话删除；不 commit/push、不调用 plugin_manager、不改 profile、不发布 npm。本轮为隔离回归，没有重新执行真机验收。
+
+
+## Windows 与 DSH rc.2 兼容 — 已交付实现及 macOS 隔离验收（2026-11-23）
+
+### 目标与范围
+
+支持 Windows JSONL 删除并兼容 DSH 0.2.2-rc.2 / rc.5；不改变 d-trash 包身份、trash 内部 id、domain version 1、
+Host 独占状态、先日志后记录、失败凭据和保留范围。Windows 原生验收待用户代跑，不计为本轮真机通过。
+
+### 做法
+
+- **POSIX-only 硬拒绝已废弃**：官方 JSONL 的 Windows 写者使用内核信号量。安装版 Electron 44.7.0 / Node 24.21.0
+  直接 import 官方 lease.ts 报 ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING，因此实现同名、同签名、同等待/释放语义的 Koffi 租约；
+  POSIX 保留官方 flock 与既有 O_NOFOLLOW 文件检查，不使用私有目录锁。官方 open('w') 是截断而非 unlink，本插件不采用该创建/截断行为。
+- locate 不依赖锁文件，Windows no-file lease；canonical realpath/lstat 与非零 ino、同设备、intent、最终复核仍强制。
+  Windows rename 最多 5 次重试且每次重做全部门禁；rm 有界重试并校验暂存。冲突目标不覆盖、EXDEV 不复制，失败凭据保留。
+- Windows 同名信号量不随 rename 移动，恢复时同时检查原 source 和 target。Local 命名空间仅同 Windows 登录会话；
+  kernel 对象在最后句柄关闭时销毁，无过期抢锁。仍不保证释放后无 source 重建或跨服务事务；与官方写者协议一致。
+- npm pack 获取两版 17 个官方包，对全部 authored sources 比较。Host/persist/domain/Typert、model/feed、catalog、gateway、layout/slots 一致；
+  Workspace UI 的 picker factory 与 Sidebar session.action 为 rc.5 新增，不改变本插件四个 slot。
+  DSH peers 改 ^0.2.2-rc.2，开发版本继续精确 rc.5；Client 检查读/订阅/replace/follow，缺能力明确拒绝。
+- 默认测试不需要 DSH；路径/子进程/junction 支持 Windows。POSIX-only 测试明确 SKIP，新建 Windows 原生用例；
+  discovery 由 Node runner 启动 Electron，无安装版变量输出明确 SKIP，有变量时任何失败返回非零。
+
+### 验收标准与结果
+
+macOS build/test/discovery/pack 通过；完整默认 smoke、37 个文件系统场景、21 个日志场景，以及平台 4 项通过/6 项 Windows-only 跳过。
+两版真实 peers 分别在临时树完成 tsc/Typert/Client/full smoke 与 feed/model、官方 lease 双向互斥；生成的 Typert 产物相同。
+安装版 rc.5 discovery 在 Electron 44 / Node 24 通过；未做 rc.2 Desktop GUI 或本轮真实会话复验。
+Windows 自检命令和预期通过/跳过数见 docs/DETAIL.md 的 Windows self-check；调研、包摘要与本轮输出见本地 CODEX_PLATFORM.md。
+
+### 明确不做什么
+
+不改核心/profile、不 install_bundle、不安装/启用插件、不操作真实会话、不发布或推送。不引入其它 backend、私有锁兜底、
+超时夺锁或跨设备 copy。Windows 原生结果由用户代跑提供；已有真机记录不作为本轮 Windows/rc.2 GUI 证明。

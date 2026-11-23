@@ -1,8 +1,9 @@
-import { constants, type BigIntStats } from 'node:fs'
-import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises'
+import type { BigIntStats } from 'node:fs'
+import { lstat, mkdir, rename, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
+import { acquireWriteLease } from './write-lease.js'
+import { retrySharing, isCanonicalPath } from './fs-retry.js'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 
@@ -42,7 +43,7 @@ export class PurgeError extends Error {
 const same = (a: BigIntStats, b: BigIntStats): boolean => a.dev === b.dev && a.ino === b.ino
 const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
 
-/** POSIX maintenance only. Never creates/truncates/unlinks a live lock file. */
+/** JSONL maintenance. Never creates/truncates/unlinks a live POSIX lock file. */
 export class SessionPurger {
   constructor(private readonly observe: (id: SessionId) => Promise<SessionPersistenceSnapshot | undefined>,
     private readonly report: (id: SessionId, stage: string) => Promise<void> = async () => {}) {}
@@ -56,7 +57,6 @@ export class SessionPurger {
    * DSH_HOME is a shell hint, not the Host's persistence location authority.
    */
   private async roots(source: string): Promise<SessionRoots> {
-    if (process.platform === 'win32') throw new Error('POSIX flock is required')
     const root = dirname(dirname(source))
     const home = dirname(root)
     const parts = relative(root, source).split(sep)
@@ -64,8 +64,8 @@ export class SessionPurger {
       || parts.length !== 2 || parts.some(part => !part || part === '..' || part.startsWith('.'))) {
       throw new Error('Session path is outside sessions root or has an unsafe directory identity')
     }
-    if (await realpath(home) !== home) throw new Error('DSH home must not be a symlink')
-    if (await realpath(root) !== root) throw new Error('Sessions root must not be a symlink')
+    if (!await isCanonicalPath(home)) throw new Error('DSH home must not be a symlink')
+    if (!await isCanonicalPath(root)) throw new Error('Sessions root must not be a symlink')
     // JSONL discovery treats every root child directory (including dot dirs) as
     // a project, then every project child directory as a session. Keep renamed
     // sessions outside that tree, including while recovering from a crash.
@@ -79,15 +79,16 @@ export class SessionPurger {
     const log = resolve(snapshot.location.path)
     const source = dirname(log)
     const roots = await this.roots(source)
-    if (await realpath(source) !== source || await realpath(log) !== log) {
+    if (!(await lstat(dirname(source))).isDirectory()) throw new Error('Session project must not be a symlink')
+    if (!await isCanonicalPath(source) || !await isCanonicalPath(log)) {
       throw new Error('Session path is outside sessions root or has an unsafe directory identity')
     }
     const identity = await lstat(source, { bigint: true })
-    if (!identity.isDirectory() || !(await lstat(log)).isFile()) throw new Error('Invalid session directory/artifact')
+    if (!identity.isDirectory() || identity.ino === 0n || !(await lstat(log)).isFile()) throw new Error('Invalid session directory/artifact')
     return { ...roots, source, log, identity }
   }
 
-  /** flock → recheck → durable intent → final gate → whole-directory rename → close. */
+  /** Write lease → recheck → durable intent → final gate → whole-directory rename → close. */
   async move(id: SessionId, gate: () => void, save: (intent: PurgeIntent) => Promise<void>): Promise<PurgeIntent> {
     let stage = 'gate'
     try {
@@ -95,14 +96,11 @@ export class SessionPurger {
       const before = await this.locate(id)
       await this.report(id, 'gate')
       stage = 'lock'
-      const lockPath = join(before.source, 'session.lock')
-      const handle = await open(lockPath, constants.O_RDWR | constants.O_NOFOLLOW)
+      const lease = await acquireWriteLease(before.source)
       try {
-        await tryLockExclusive(handle.fd)
         await this.report(id, 'locked')
         stage = 'recheck'
-        const locked = await handle.stat({ bigint: true })
-        if (!locked.isFile() || !same(locked, await lstat(lockPath, { bigint: true }))) throw new Error('Lock inode changed')
+        await lease.verify()
         const after = await this.locate(id)
         if (after.source !== before.source || after.log !== before.log || !same(after.identity, before.identity)) {
           throw new Error('Session directory identity changed')
@@ -111,7 +109,7 @@ export class SessionPurger {
         await this.report(id, 'recheck')
         const { staging } = after
         await mkdir(staging, { recursive: true, mode: 0o700 })
-        if (await realpath(staging) !== staging || !(await lstat(staging)).isDirectory()) throw new Error('Unsafe staging directory')
+        if (!await isCanonicalPath(staging) || !(await lstat(staging)).isDirectory()) throw new Error('Unsafe staging directory')
         if ((await lstat(staging, { bigint: true })).dev !== before.identity.dev) throw new Error('Staging is on another filesystem')
         const intent: PurgeIntent = { source: before.source,
           target: join(staging, `${encodeURIComponent(id)}-${randomUUID()}`),
@@ -120,24 +118,32 @@ export class SessionPurger {
         await save(intent)
         await this.report(id, 'intent')
         stage = 'recheck'
-        const final = await this.locate(id)
-        if (final.source !== before.source || final.log !== before.log || !same(final.identity, before.identity)
-          || await realpath(staging) !== staging
-          || !same(before.identity, await lstat(before.source, { bigint: true }))
-          || !same(locked, await lstat(lockPath, { bigint: true }))) throw new Error('Directory/lock identity changed before rename')
-        gate()
-        stage = 'rename'
-        await rename(before.source, intent.target)
+        await retrySharing(async () => {
+          stage = 'recheck'
+          const final = await this.locate(id)
+          if (final.source !== before.source || final.log !== before.log || !same(final.identity, before.identity)
+            || !await isCanonicalPath(staging)
+            || !same(before.identity, await lstat(before.source, { bigint: true }))) throw new Error('Directory identity changed before rename')
+          await lease.verify()
+          stage = 'rename'
+          // Never replace a preexisting staging object, even on POSIX.
+          try { await lstat(intent.target); throw new Error('Staging target already exists') }
+          catch (error) { if (!missing(error)) throw error }
+          gate()
+          stage = 'rename'
+          await this.renameDirectory(before.source, intent.target)
+        })
         await this.report(id, 'renamed')
         return intent
       } finally {
-        // This closes the very inode moved by rename. No unlink while held.
-        await handle.close()
+        // POSIX closes the inode moved by rename; Windows releases the original
+        // path-named semaphore. Neither branch unlinks a held lock.
+        await lease.release()
         await this.report(id, 'unlocked')
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException)?.code
-      if (stage === 'lock' && (code === 'EAGAIN' || code === 'EWOULDBLOCK')) {
+      if (stage === 'lock' && (code === 'EBUSY' || code === 'EAGAIN' || code === 'EWOULDBLOCK')) {
         throw new PurgeError(id, 'lock', new Error('Session lock is busy; session may be open or writing', { cause: error }))
       }
       throw new PurgeError(id, stage, error)
@@ -157,7 +163,7 @@ export class SessionPurger {
     const source = await lstat(intent.source, { bigint: true }).catch(error => { if (missing(error)) return undefined; throw error })
     const target = await lstat(intent.target, { bigint: true }).catch(error => { if (missing(error)) return undefined; throw error })
     if (source) {
-      if (await realpath(intent.source) !== intent.source || target || String(source.dev) !== intent.dev || String(source.ino) !== intent.ino) throw new Error('Source was replaced during purge')
+      if (!await isCanonicalPath(intent.source) || target || String(source.dev) !== intent.dev || String(source.ino) !== intent.ino) throw new Error('Source was replaced during purge')
       return { status: 'unmoved', home }
     }
     if (!target) {
@@ -167,30 +173,45 @@ export class SessionPurger {
       return { status: 'deleted', home }
     }
     if (!target.isDirectory() || String(target.dev) !== intent.dev || String(target.ino) !== intent.ino
-      || await realpath(staging) !== staging || await realpath(intent.target) !== intent.target) throw new Error('Staged directory identity changed')
-    const handle = await open(join(intent.target, 'session.lock'), constants.O_RDWR | constants.O_NOFOLLOW)
-      .catch(error => { if (missing(error) && intent.deleting) return undefined; throw error })
-    if (handle) try {
-      await tryLockExclusive(handle.fd)
-      const held = await handle.stat({ bigint: true })
-      if (!same(held, await lstat(join(intent.target, 'session.lock'), { bigint: true }))) throw new Error('Staged lock inode changed')
-    } finally { await handle.close() }
-    intent.deleting = true
-    await save(intent)
-    await this.removeDirectory(intent.target)
+      || !await isCanonicalPath(staging) || !await isCanonicalPath(intent.target)) throw new Error('Staged directory identity changed')
+    // Windows exclusion is path-named: protect the original writer name AND
+    // the staged name. POSIX rename carries the locked inode to the target.
+    const sourceLease = process.platform === 'win32' ? await acquireWriteLease(intent.source) : undefined
+    try {
+      const lease = await acquireWriteLease(intent.target, intent.deleting)
+      try {
+        await lease.verify()
+        if (!await isCanonicalPath(intent.target)
+          || !same(target, await lstat(intent.target, { bigint: true }))) throw new Error('Staged directory identity changed')
+        const recreated = await lstat(intent.source).catch(error => { if (missing(error)) return undefined; throw error })
+        if (recreated) throw new Error('Source was replaced during purge')
+        intent.deleting = true
+        await save(intent)
+      } finally { await lease.release() }
+    } finally { await sourceLease?.release() }
+    // No open POSIX descriptor during rm. Each retry revalidates the receipt;
+    // a failed/partial rm keeps deleting=true for a later purge/empty call.
+    await retrySharing(async () => {
+      const current = await lstat(intent.target, { bigint: true })
+      if (!same(target, current) || !await isCanonicalPath(intent.target)
+        || !await isCanonicalPath(staging)) throw new Error('Staged directory identity changed')
+      await this.removeDirectory(intent.target)
+    })
     await this.report(id, 'logs-deleted')
     return { status: 'deleted', home }
   }
 
-  /** Separate method permits failure/crash injection in isolated fixtures. */
-  async removeDirectory(target: string): Promise<void> { await rm(target, { recursive: true }) }
+  /** Separate methods permit sharing-violation injection in isolated fixtures. */
+  async renameDirectory(source: string, target: string): Promise<void> { await rename(source, target) }
+
+  async removeDirectory(target: string): Promise<void> { await rm(target, { recursive: true, maxRetries: 4, retryDelay: 50 }) }
 
   async clearProjection(id: SessionId, home: string): Promise<void> {
-    if (!isAbsolute(home) || home !== resolve(home) || await realpath(home) !== home) throw new Error('Unsafe projection cache home')
+    if (!isAbsolute(home) || home !== resolve(home) || !await isCanonicalPath(home)) throw new Error('Unsafe projection cache home')
     if (!id || /[/\\]/.test(id) || id === '.' || id === '..') throw new Error('Unsafe projection cache key')
     const parent = join(home, 'storages', 'session_projcache', 'sessions')
     try {
-      if (await realpath(parent) !== parent) throw new Error('Unsafe projection cache directory')
+      if (!await isCanonicalPath(parent)) throw new Error('Unsafe projection cache directory')
       await rm(join(parent, `${id}.json`), { force: true })
     } catch (error) { if (!missing(error)) throw error }
   }

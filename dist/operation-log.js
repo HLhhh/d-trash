@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, realpath } from 'node:fs/promises';
+import { lstat, mkdir, open } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isCanonicalPath } from './fs-retry.js';
 // Share queues across service instances in this process; O_APPEND also keeps
 // independent processes from overwriting each other's existing bytes.
 const writers = new Map();
@@ -38,18 +39,28 @@ export class OperationLog {
             const file = join(home, 'logs', 'trash.log');
             const previous = writers.get(file) ?? Promise.resolve();
             const writing = previous.then(async () => {
-                if (await realpath(home) !== home)
+                if (!await isCanonicalPath(home))
                     throw new Error('Unsafe operation log home');
                 const directory = join(home, 'logs');
                 await mkdir(directory, { recursive: true, mode: 0o700 });
-                if (await realpath(directory) !== directory || !(await lstat(directory)).isDirectory()) {
+                if (!await isCanonicalPath(directory) || !(await lstat(directory)).isDirectory()) {
                     throw new Error('Unsafe operation log directory');
                 }
+                const before = await lstat(file, { bigint: true }).catch(error => { if (error.code === 'ENOENT')
+                    return undefined; throw error; });
+                if (before && !before.isFile())
+                    throw new Error('Operation log must be a regular file');
+                // Windows uses lstat/canonical/handle identity checks, never assumes
+                // that POSIX O_NOFOLLOW or O_NONBLOCK flags are implemented there.
+                const posixFlags = process.platform === 'win32' ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK;
                 const handle = await open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND
-                    | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
+                    | (before ? 0 : constants.O_EXCL) | posixFlags, 0o600);
                 try {
-                    if (!(await handle.stat()).isFile())
-                        throw new Error('Operation log must be a regular file');
+                    const held = await handle.stat({ bigint: true });
+                    const current = await lstat(file, { bigint: true });
+                    if (!held.isFile() || !current.isFile() || held.ino !== current.ino || held.dev !== current.dev
+                        || !await isCanonicalPath(file))
+                        throw new Error('Operation log identity changed');
                     await handle.chmod(0o600);
                     await handle.appendFile(line, 'utf8');
                 }

@@ -22,7 +22,7 @@ The global panel lists sessions newest first, with titles, current workspaces, a
 
 ## Installation
 
-Requires DSH **0.2.2-rc.5** and Node **`^22.19.0 || >=24.0.0`**. The repository includes built `dist/` files.
+Supports DSH **0.2.2-rc.2 and rc.5** and Node **`^22.19.0 || >=24.0.0`**. The repository includes built `dist/` files.
 
 For a local checkout:
 
@@ -58,7 +58,7 @@ Deletion requires inline confirmation; Cancel or Escape dismisses it. A pending 
 
 The Host service is the only writer of Trash state. Ordinary visible Trash is **`marker ∩ archived`**: native Archive never creates a Trash marker. Native unarchive removes a session from that intersection; the next Host list reconciles its stale marker. Native Archive and Pin behavior is preserved.
 
-Permanent deletion requires a validated JSONL session path and matching filesystem identity. The Host acquires the official exclusive `flock` on the existing `session.lock`, persists deletion intent, rechecks identity, renames the whole session directory into a same-device staging directory beside `sessions`, closes the lock, then removes the staged directory. It then clears workspace membership, archive state, and the marker, and attempts projection-cache cleanup. Failed cleanup keeps durable receipts for a later delete/empty retry; pending diagnostics stay visible independently of the ordinary Trash intersection.
+Permanent deletion requires a validated JSONL session path and matching filesystem identity. The Host acquires backend-compatible write exclusion: official `flock` on an existing `session.lock` on POSIX, or the backend-named kernel semaphore via Koffi on Windows, persists deletion intent, rechecks identity, renames the whole session directory into a same-device staging directory beside `sessions`, closes the lock, then removes the staged directory. It then clears workspace membership, archive state, and the marker, and attempts projection-cache cleanup. Failed cleanup keeps durable receipts for a later delete/empty retry; pending diagnostics stay visible independently of the ordinary Trash intersection.
 
 See [DETAIL.md](./docs/DETAIL.md) and [PLAN.md](./PLAN.md) for the full protocol and recovery boundaries.
 
@@ -66,12 +66,14 @@ See [DETAIL.md](./docs/DETAIL.md) and [PLAN.md](./PLAN.md) for the full protocol
 
 | Component | Requirement / verified boundary |
 | --- | --- |
-| DSH | Verified against **0.2.2-rc.5**; DSH peers declare `^0.2.2-rc.5` |
+| DSH | Isolated API/build/test matrix: **0.2.2-rc.2 and rc.5**; DSH peers `^0.2.2-rc.2`; installed discovery on rc.5 |
 | Cordis | Peer `^4.1.0` |
-| Native filesystem support | `@deepseek-ai/node-addon-system` peer `^0.1.2` |
+| Native filesystem support | POSIX: `@deepseek-ai/node-addon-system` peer `^0.1.2`; Windows: bundled dependency `koffi` 3.1.1 |
 | Node.js | `^22.19.0 || >=24.0.0` |
-| Host platform | Verified on macOS; deletion requires POSIX and official native flock support; Windows is unsupported |
-| Session backend | JSONL only for permanent deletion; missing locks or unreliable paths/identity are rejected |
+| Host platform | macOS regressions passed; Windows implementation included, native Windows acceptance pending user run |
+| Session backend | JSONL only for permanent deletion; POSIX requires an existing lock file; Windows needs no lock file; unreliable paths/identity or unavailable native exclusion are rejected |
+
+No rc.2 Desktop GUI or Windows acceptance was performed in this run. [Windows self-check commands](./docs/DETAIL.md#windows-self-check) use temporary synthetic homes only.
 
 Peer ranges allow compatible updates; they do not mean later DSH versions have been tested. Recheck Client workspace projection and native locking after upgrading.
 

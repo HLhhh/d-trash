@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { lstat, open, readFile, readdir, rename, rm, mkdir, symlink, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'
+import { acquireWriteLease } from '../dist/write-lease.js'
 import { fixture } from './phase4-fixture.mjs'
 const exists = async path => lstat(path).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error })
 // Installed JSONL listProjectDirs/listSessionDirs rules: all root directories
@@ -26,8 +27,11 @@ const barrier = () => {
   const gate = new Promise(resolve => { release = resolve })
   return { arrived, release, async wait() { enter(); await gate } }
 }
-let count = 0
+let count = 0, skipped = 0
 async function test(name, run) {
+  if (process.platform === 'win32' && /reject symlink|reject missing-lock|ancestor symlink|SIGKILL/.test(name)) {
+    skipped++; console.log(`SKIP: phase4 ${name} (POSIX symlink/O_NOFOLLOW, existing lock-file or SIGKILL contract)`); return
+  }
   const f = await fixture()
   let deadline
   const timeout = new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error(`Timed out: ${name}`)), 15000) })
@@ -48,21 +52,19 @@ const unchanged = async (f, id = 'a') => {
 }
 
 await test('physical deletion cleans all generations, ownership, archive, marker and cache in order', async f => {
-  await f.create('im-link:synthetic')
-  const id = 'im-link:synthetic', before = await lstat(f.directory(id), { bigint: true })
+  const id = process.platform === 'win32' ? 'im-link-synthetic' : 'im-link:synthetic'
+  await f.create(id)
+  const before = await lstat(f.directory(id), { bigint: true })
   f.hooks.put = async (key, record) => {
     if (!record.purge || record.purge.deleting) return
-    const handle = await open(join(f.directory(id), 'session.lock'), 'r+')
-    try { await assert.rejects(tryLockExclusive(handle.fd), error => ['EAGAIN', 'EWOULDBLOCK'].includes(error.code)) }
-    finally { await handle.close() }
+    await assert.rejects(acquireWriteLease(f.directory(id)), /busy/)
   }
   const remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
   f.trash.purger.removeDirectory = async path => {
     const moved = await lstat(path, { bigint: true })
     assert.equal(moved.ino, before.ino); assert.equal(moved.dev, before.dev)
-    const lock = await open(join(path, 'session.lock'), 'r+')
-    await tryLockExclusive(lock.fd) // Original flock was released before rm.
-    await lock.close()
+    const lock = await acquireWriteLease(path) // Original lease was released before rm.
+    await lock.release()
     assert.equal(f.medium.has(id), true); assert.equal(f.archived.has(id), true)
     await remove(path)
   }
@@ -228,10 +230,10 @@ for (const mode of ['not-trash', 'unarchived', 'outside', 'extra-level', 'missin
   })
 }
 
-await test('external process flock contention refuses, preserves inode and permits retry after close', async f => {
+await test('external process native lease contention refuses, preserves inode and permits retry after close', async f => {
   await f.create()
   const lockPath = join(f.directory('a'), 'session.lock'), before = await lstat(lockPath, { bigint: true })
-  const child = spawn(process.execPath, [new URL('./phase4-child.mjs', import.meta.url).pathname, 'lock', lockPath], { stdio: ['pipe', 'pipe', 'pipe'], env: process.env })
+  const child = spawn(process.execPath, [fileURLToPath(new URL('./phase4-child.mjs', import.meta.url)), 'lock', f.directory('a')], { stdio: ['pipe', 'pipe', 'pipe'], env: process.env })
   let stderr = ''; child.stderr.on('data', value => { stderr += value })
   try {
     const [data] = await once(child.stdout, 'data'); assert.match(String(data), /LOCKED/, stderr)
@@ -292,7 +294,7 @@ await test('SIGKILL immediately after real rename leaves recoverable staging and
   await f.create('b')
   const root = join(f.home, 'sessions')
   assert.deepEqual(await discoverSessionDirs(root), [f.directory('a'), f.directory('b')])
-  const child = spawn(process.execPath, [new URL('./phase4-child.mjs', import.meta.url).pathname, 'crash', f.home], { stdio: ['ignore', 'pipe', 'pipe'], env: process.env })
+  const child = spawn(process.execPath, [fileURLToPath(new URL('./phase4-child.mjs', import.meta.url)), 'crash', f.home], { stdio: ['ignore', 'pipe', 'pipe'], env: process.env })
   let stderr = ''; child.stderr.on('data', value => { stderr += value })
   const [code, signal] = await once(child, 'exit')
   assert.equal(signal, 'SIGKILL', `unexpected ${code}: ${stderr}`)
@@ -392,10 +394,9 @@ await test('projection failure is a warning and does not reverse physical deleti
 
 await test('empty reports partial success and retains busy marker for retry', async f => {
   await f.create('a'); await f.create('b')
-  const lock = await open(join(f.directory('a'), 'session.lock'), 'r+')
-  await tryLockExclusive(lock.fd)
+  const lock = await acquireWriteLease(f.directory('a'))
   try { await assert.rejects(f.trash.emptyTrash(), /1 deleted, 1 failed.*busy/) }
-  finally { await lock.close() }
+  finally { await lock.release() }
   assert.equal(f.medium.has('a'), true); assert.equal(f.medium.has('b'), false)
   assert.equal(await f.trash.emptyTrash(), 1)
   assert.equal(await f.trash.emptyTrash(), 0)
@@ -431,4 +432,4 @@ await test('restore before purge and ordinary restore preserve logs and ownershi
   assert.equal(await exists(f.cache('a')), true)
   assert.equal(await readFile(f.log('a'), 'utf8'), 'SYNTHETIC TEST LOG ONLY\n')
 })
-console.log(`PASS: phase4 ${count} isolated filesystem scenarios, native flock/rename, actual process crash; no real sessions`)
+console.log(`PASS: phase4 ${count} isolated filesystem scenarios, native lease/rename; ${skipped} explicitly skipped; no real sessions`)

@@ -39,14 +39,20 @@ marker 写入失败时，仅在原先未归档且确认没有 marker 时撤销�
 ## 物理删除与失败恢复
 
 官方把 session pruning 定义为带外 backend maintenance，持久化 seam 无 delete API。
-`src/purge.ts` 通过安装版官方 `@deepseek-ai/node-addon-system/flock` 获取独占锁；
-缺失原生支持、锁文件、匹配的 JSONL stat/header/绝对 path 时拒绝。
+`src/purge.ts` 使用 `src/write-lease.ts` 的 backend 兼容写租约：POSIX 保留官方
+`@deepseek-ai/node-addon-system/flock`，以 O_NOFOLLOW 打开既有普通锁文件，不创建/截断/unlink；
+Windows 只加载 Koffi 3.1.1，以 `Local\dsh-session-lock-<sha256(resolve(lockPath).toLowerCase())>`
+命名的 count-1 内核信号量与 JSONL backend 写者互斥，不需要 `session.lock`，也不加载 POSIX addon。
+locate 和审计日志不依赖锁文件；任何平台缺少可靠互斥、匹配 JSONL stat/header/绝对 path 或文件身份时拒绝删除。
+安装版 Electron 44.7.0 / Node 24.21.0 直接 import 官方 `src/lease.ts` 实测失败：
+`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，所以使用等价协议，没有运行时 TS 转译兜底。
+官方 POSIX lease 的 `open('w')` 会截断但不 unlink；本插件采用更严格的既有文件 open。
 从 `stat().location.path` 向上依次得到会话目录、slug、sessions 根、DSH home；
 根名必须为 `sessions`，home、根与日志/会话路径必须通过 realpath 校验，限定两层会话目录并禁止 symlink。
 不读取环境变量 `DSH_HOME`，缺失或错误值都不影响定位；下文 `$DSH_HOME` 均指反推并校验的 home。
 取锁后及 intent 持久化后重复 stat/realpath/dev/ino 校验。原目录名只由 stat 提供，不自行编码推导。
 
-执行顺序是 flock → 复核 → marker 保存 purge intent → 最后复核 → 整体 rename 到
+执行顺序是写租约 → 复核 → marker 保存 purge intent → 最后复核 → 整体 rename 到
 `$DSH_HOME/sessions.trash-purge-staging/<encoded-id>-<uuid>` → close 释放锁 →
 递归 rm 暂存 → detach 当前包含该 session 的各工作区 → unarchive → 删 marker → 尝试删除投影缓存。
 逐工作区检查成员并汇总实际 detach 失败；不调用非成员工作区，不产生其 no-op 日志。
@@ -71,7 +77,7 @@ marker 的可选私有 `purge` 存 source/target/dev/ino/deleting/logsDeleted；
 `emptyTrash` 尝试全部条目，失败汇总成功数与阶段。Client 对失败也重读列表和只读 Workspace 投影，
 显示部分成功和可重试的诊断条目。投影缓存失败只记录警告，此时 marker 可能已清除，不保证后续 purge 自动重试缓存。搜索索引依赖下一次稳定搜索观测时的现有同步收敛；已检查的 query API 没有公开 rescan，不调用私有 `_reconcile` 或直接编辑 SQLite。
 附件、工作区文件、worktree、产物、服务端日志、备份及其它插件扫描快照均保留；不承诺安全擦除或搜索立即消失。
-仅覆盖 POSIX JSONL 与进程崩溃，不声称断电事务；有 pending 凭据时不要降级旧版插件。
+仅覆盖 JSONL 与进程崩溃，不声称断电事务；有 pending 凭据时不要降级旧版插件。
 
 ## 持久化操作日志
 
@@ -82,7 +88,7 @@ Host 将操作记录追加到 **`$DSH_HOME/logs/trash.log`**（UTF-8 JSONL，一
 再由 `sessionPersistence.list()` 获取候选 id 并重新 `stat` 校验，不从 id 拼原目录。
 若没有任何可靠 stat/凭据（例如全新空 home 的首次调用），无法安全确定日志路径，此次降级到 logger。
 
-目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并在每次打开后收紧到 0600。
+POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并在每次打开后收紧到 0600。Windows 不承诺 POSIX mode 位等价于 ACL。
 已有 logs 目录的权限保持原样；home/logs 的 symlink、日志 symlink 与非普通文件拒绝写入。
 文件始终以 `O_APPEND` 打开，不截断；同进程所有实例共用按路径串行队列。
 **轮转未启用，大小阈值无（不限制单文件大小）**；插件不会改写或清空历史记录。
@@ -160,7 +166,7 @@ Client 先 `await ctx.remote.$mount(contribution)`，再 `ctx.get('remote.trash'
 不保证不同通道间瞬间无闪烁。显式刷新失败向调用 UI 报错；后台刷新失败在下一帧、动作或手动刷新重试。
 只读首帧仍需要可用的 Workspace follow endpoint 及读取权限。
 
-此能力依据安装版 DSH **0.2.2-rc.5** 源码：`WorkspaceController.list = model`，
+此能力依据安装版 rc.5 以及 npm pack 获取的 DSH **0.2.2-rc.2 / rc.5** 源码：`WorkspaceController.list = model`，
 `ClientWorkspaceModel.replaceArchived/replacePinned`，以及 `WorkspaceFeed.baseline/follow`。
 服务 facade 的 `WorkspaceSource` 类型只承诺读取/订阅，本插件对实际 model 方法做能力检查；
 没有从内部 Client 包运行时 require，也没有改 DSH 核心。升级 DSH 后需重新核实这个版本边界。
@@ -191,7 +197,71 @@ SIGKILL 回归按真实两层目录枚举规则验证重启前后残留不可发
 
 公开包身份为 `d-trash@0.1.0`，MIT，目标仓库 `HLhhh/d-trash`；版本不对应期号。locale 的 `meta.detail` 指向此文档，packed 文件包含 PLAN、
 docs、双语 README、LICENSE、CHANGELOG、locale、icon、patch 和运行产物；`dist/` 随仓库提交，`CODEX_*.md` 仅本地保留。
-Cordis peer 为 `^4.1.0`，DSH peers 为 `^0.2.2-rc.5`，node-addon-system peer 为 `^0.1.2`；开发依赖保持精确，
+Cordis peer 为 `^4.1.0`，DSH peers 为 `^0.2.2-rc.2`，node-addon-system peer 为 `^0.1.2`；开发依赖保持精确，
 Node 要求 `^22.19.0 || >=24.0.0`。这些声明区间不代表后续 DSH 版本已验证。Client id 复用 manifest 生成的 contribution.package；测试和夹具读取 manifest.name。
 安装和使用见 [English README](../README.md) / [中文 README](../README_zh.md)。`profile-boot.cjs` 是历史只读真实 profile 诊断入口，不在默认测试链；
 本次只同步其包身份并做语法检查，不运行真实 profile boot。开源整理的隔离验收结果见 [PLAN](../PLAN.md)；详细输出保留于本地 CODEX 报告，不随仓库或包分发。
+
+
+## 平台与版本兼容 — 2026-11-23
+
+rc.2/rc.5 的 persistence stat/list/location、JSONL lease/win32、WorkspaceRegistry archive/unarchive/归档集合、
+Workspace.sessionIds/detachSession、storage-domain defineDomain/domainTable/Domain.table、Typert Remote 和生成协议，
+以及 ClientWorkspaceModel、WorkspaceFeed、Session catalog 源码均一致。两版的真实 npm 包分别完成隔离 tsc、
+Typert、Client 打包、完整 smoke、原生 lease 互斥及 feed/model 探针；其它传递依赖复用开发树，非完整旧版 Desktop。
+rc.5 仅在 Workspace UI 新增 picker factory、Sidebar 新增 sidebar.session.action 等 UI；本插件四个 slot 契约无变。
+Client 运行时显式检查 model 的读/订阅/replace 方法及 remote.follow；缺少能力直接失败，不发起第二次归档业务写作为兜底。
+rc.5 安装版 Electron discovery 通过；本轮没有 rc.2 Desktop GUI、Windows 或真实会话验收。
+
+Windows 的信号量与 backend 的命名、FFI 签名、0 超时、释放顺序相同；不使用插件私有目录锁。
+暂存恢复同时检查原路径和暂存路径的信号量，因为 rename 不会改变内核对象名。
+命名信号量在同一个 Windows 登录会话（Local namespace）内互斥，崩溃后最后一个句柄关闭才销毁，
+没有超时抢锁；与官方相同，不提供跨登录会话的排他，也不能阻止释放后原生重建 source。
+POSIX 的 inode 锁随 rename 移动，Windows 的路径名锁留在原路径；因此两者的命名模型不同，
+但对各平台 backend 写者的排他协议相同，不宣称跨进程维护事务。
+
+Windows rename 对 EBUSY/EPERM/EACCES/ENOTEMPTY 最多 5 次，每次重试重新验证 stat、dev/ino、
+canonical path、租约、归档门禁和 target 不存在；不覆盖冲突目标，不跨卷复制。rm 有界重试并复核暂存身份；
+耗尽重试保留 intent/deleting，供下次 purge/empty 恢复。Windows 使用 realpath/lstat 与非零 ino 验证，
+不依赖 O_NOFOLLOW 支持；POSIX 继续使用 O_NOFOLLOW。盘符/路径大小写可比对，junction/symlink 仍拒绝。
+
+测试通过数和 SKIP 分开输出。Windows 跳过原 POSIX symlink/O_NOFOLLOW、缺锁拒绝、SIGKILL 场景和 mode 位断言，
+另跑无锁文件、命名信号量竞争/大小写、终止进程释放、junction 拒绝、rename/rm 重试及审计用例。
+macOS 跳过明确要求 Windows 的 6 项，不把注入错误的策略单元测试当作 Windows 原生验收。
+
+<a id="windows-self-check"></a>
+## Windows self-check
+
+在 checkout 中使用 PowerShell，Node 需满足 package.json engines。命令只运行合成临时 home，
+不需要安装插件、不操作真实会话。npm ci 仅安装本项目依赖。
+
+```powershell
+npm ci
+if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+npm run build
+if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+npm test 2>&1 | Tee-Object platform-test.log
+if ($LASTEXITCODE -ne 0) { throw 'tests failed; return platform-test.log' }
+npm run test:discovery 2>&1 | Tee-Object platform-discovery.log
+if ($LASTEXITCODE -ne 0) { throw 'discovery failed; return platform-discovery.log' }
+npm pack --dry-run --json
+if ($LASTEXITCODE -ne 0) { throw 'pack failed' }
+```
+
+预期 build 输出 Typert / Client generated/bundled；npm test 输出平台 10 passed/0 skipped、phase4 27 passed/10 skipped、
+日志 19 passed/2 skipped（每个 SKIP 带 POSIX 原因），其余 Host/Client/生成器通过，退出码 0。
+无安装版变量时 discovery 明确输出 SKIP，不算 discovery 通过。若已安装 DSH，可仅设置以下两个路径再运行；
+runner 负责 ELECTRON_RUN_AS_NODE、等待 GUI 子系统 Electron 退出和转发输出，无需修改 profile：
+
+```powershell
+$env:DSH_NODE_EXECUTABLE = 'C:\实际安装路径\DeepSeek Harness.exe'
+$env:DSH_INSTALL_DIR = 'C:\实际安装路径\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh'
+npm run test:discovery 2>&1 | Tee-Object platform-discovery.log
+if ($LASTEXITCODE -ne 0) { throw 'discovery failed' }
+```
+
+有效 discovery 应输出 runtime 中的 electron/node/dsh、official-lease-import 的明确结果，
+official-lease-mutual-exclusion 的 bothDirections/reacquire=true、四个 slot/Gateway 证据和最终 PASS，
+不能只有 SKIP。pack 应列出 d-trash、dist/write-lease.js、dist/fs-retry.js 与所需资源，无 CODEX 报告。
+失败时回传两份 platform 日志、命令退出码、node --version、npm --version、Windows 版本与 CPU 架构；
+不要回传真实会话内容。保留失败原文；不跳过锁竞争/路径门禁来获得绿色结果。
