@@ -26,6 +26,8 @@ export declare const copy: {
         noWorkspace: string;
         physicalDeletion: string;
         purgePending: string;
+        deferred: string;
+        deferredNotice: string;
     };
     zh: {
         moveToTrash: string;
@@ -53,6 +55,8 @@ export declare const copy: {
         noWorkspace: string;
         physicalDeletion: string;
         purgePending: string;
+        deferred: string;
+        deferredNotice: string;
     };
 };
 export type CopyKey = keyof typeof copy.en;

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { acquireWriteLease } from '../dist/write-lease.js'
-import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX } from '../dist/types.js'
+import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX, DEFERRED_PREFIX } from '../dist/types.js'
 import { MAX_BYTES, KEEP, OperationLog } from '../dist/operation-log.js'
 import { fixture } from './phase4-fixture.mjs'
 
@@ -138,13 +138,13 @@ for (const stage of ['gate', 'lock', 'recheck', 'intent', 'rename', 'delete-stag
       && row.result === (stage === 'projection' ? 'warning' : 'failed'))
     assert.ok(failure)
     assert.ok(failure.reason.length > 0)
-    assert.equal(log.at(-1).result, stage === 'projection' ? 'ok' : 'failed')
+    assert.equal(log.at(-1).result, stage === 'projection' ? 'ok' : stage === 'lock' ? 'deferred' : 'failed')
     if (stage === 'gate' || stage === 'lock') {
       const purge = log.filter(row => row.action === 'removeFromTrash')
       assert.ok(!purge.some(row => row.stage === 'locked' || row.stage === 'unlocked'),
         'a failed lease acquisition must never claim ownership or unlock')
       if (stage === 'lock') {
-        assert.deepEqual(purge.map(row => [row.stage, row.result]), [['gate', 'ok'], ['lock', 'failed'], ['complete', 'failed']])
+        assert.deepEqual(purge.map(row => [row.stage, row.result]), [['gate', 'ok'], ['lock', 'failed'], ['deferred', 'ok'], ['complete', 'deferred']])
         assert.ok(failure.reason.startsWith(`Error: ${SESSION_LOCK_BUSY_PREFIX}`))
       }
     } else {
@@ -158,16 +158,16 @@ await test('busy delete and empty preserve stable wire marker, cause and data; n
   const lock = await acquireWriteLease(f.directory('a'))
   try {
     await assert.rejects(f.trash.removeFromTrash('a'), error => {
-      assert.equal(error.code, TrashErrorCode.SessionLockBusy)
-      assert.ok(error.message.startsWith(SESSION_LOCK_BUSY_PREFIX))
+      assert.equal(error.code, TrashErrorCode.Deferred)
+      assert.ok(error.message.startsWith(DEFERRED_PREFIX))
       assert.match(error.message, /Physical deletion \[lock\] \(a\): Session lock is busy/)
-      assert.equal(error.cause.cause.code, 'EBUSY')
+      assert.equal(error.cause.cause.cause.code, 'EBUSY')
       return true
     })
     await assert.rejects(f.trash.emptyTrash(), error => {
-      assert.ok(error.message.startsWith(SESSION_LOCK_BUSY_PREFIX))
-      assert.match(error.message, /1 deleted, 1 failed/)
-      assert.equal(error.errors[0].code, TrashErrorCode.SessionLockBusy)
+      assert.ok(error.message.startsWith(DEFERRED_PREFIX))
+      assert.match(error.message, /1 deleted, 0 failed, 1 queued/)
+      assert.equal(error.code, TrashErrorCode.Deferred)
       return true
     })
     assert.equal(await readFile(f.log('a'), 'utf8'), 'SYNTHETIC TEST LOG ONLY\n')
@@ -197,10 +197,10 @@ await test('empty writes every item and partial-failure/success/zero summaries',
   delete f.hooks.detach
   assert.equal(await f.trash.emptyTrash(), 1)
   log = await rows(f)
-  assert.equal(log.at(-1).reason, '1 deleted, 0 failed')
+  assert.equal(log.at(-1).reason, '1 deleted, 0 failed, 0 queued')
   assert.ok(log.some(row => row.action === 'recovery' && row.stage === 'recovery' && row.result === 'deleted'))
   assert.equal(await f.trash.emptyTrash(), 0)
-  assert.equal((await rows(f)).at(-1).reason, '0 deleted, 0 failed')
+  assert.equal((await rows(f)).at(-1).reason, '0 deleted, 0 failed, 0 queued')
 })
 
 await test('recovery failure and retry persist using the original receipt after source removal', async f => {

@@ -395,7 +395,7 @@ await test('projection failure is a warning and does not reverse physical deleti
 await test('empty reports partial success and retains busy marker for retry', async f => {
   await f.create('a'); await f.create('b')
   const lock = await acquireWriteLease(f.directory('a'))
-  try { await assert.rejects(f.trash.emptyTrash(), /1 deleted, 1 failed.*busy/) }
+  try { await assert.rejects(f.trash.emptyTrash(), /1 deleted, 0 failed, 1 queued/) }
   finally { await lock.release() }
   assert.equal(f.medium.has('a'), true); assert.equal(f.medium.has('b'), false)
   assert.equal(await f.trash.emptyTrash(), 1)

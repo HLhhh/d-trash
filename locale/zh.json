@@ -29,6 +29,8 @@
     "unknownTime": "时间未知",
     "noWorkspace": "无所属工作区",
     "physicalDeletion": "物理删除将永久移除本地会话日志，不可恢复。",
-    "purgePending": "删除尚未完成，请重试物理删除以完成清理。"
+    "purgePending": "删除尚未完成，请重试物理删除以完成清理。",
+    "deferred": "待删除（重启 DSH 后自动完成）",
+    "deferredNotice": "已排队。重启 DSH 后自动完成；恢复可取消排队。{reason}"
   }
 }

@@ -1,4 +1,4 @@
-import type { Context } from '@deepseek-ai/cordis';
+import { Service, type Context } from '@deepseek-ai/cordis';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { type TrashRecord } from './types.js';
@@ -18,7 +18,15 @@ export default class TrashService extends TypertRemoteService {
     private persistenceHome?;
     private readonly sessions;
     private boundary;
+    private stopped;
+    private startupTimer?;
+    private startupStarted;
+    private readonly startupSettled;
     constructor(ctx: Context);
+    /** Cordis class-plugin apply hook. Return immediately; never await maintenance. */
+    [Service.init](): void;
+    private scheduleStartup;
+    private retryDeferred;
     /**
      * Observable trash = marker ∩ archived. Native unarchive bypasses our lock;
      * listTrash reconciles markers left by later native writes. Check both sides

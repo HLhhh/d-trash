@@ -15,6 +15,7 @@
 | 交付与技术 | 插件 bundle，不 fork 核心；TypeScript strict / ESM；Host 为 service class，领域对象用 interface，Client 为 React 函数组件与 hooks |
 | 三态非对称 | 普通可观测 `trash = marker ∩ archived`；原生归档不写 marker，原生取消归档后的 stale marker 由 Host 读取对账 |
 | 操作 | 收进保留日志；普通恢复取消归档并保留当前成员位置；彻底删除/清空物理删除本地会话日志，不可恢复 |
+| 排队状态 | marker 私有 `deferredAt` 表示 lock-busy 尚未开始删除；Remote `deferred`；启动后台重试；恢复仅取消排队、保留归档 |
 | 删除中状态 | Host 私有 `purge` 凭据属于待清理诊断；Remote 只给 `purgePending`，独立于普通 trash 交集保留展示 |
 | 入口与范围 | 右键菜单 + 行 hover；左侧栏图标打开中央面板；全局跨 workspace，标注当前所属工作区 |
 | UI / i18n | 惰性 ModuleLoader 工厂，只从浏览器模块表取 React；locale JSON 为中英文案唯一源；样式用 `--dsw-alias-*` |
@@ -32,7 +33,7 @@
 
 - `src/` → `dist/`：`npm run build` / `pnpm build` = `tsc -p tsconfig.json` → `scripts/generate-typert.mjs` → `scripts/build-client.mjs`。NodeNext、ES2022、strict、声明文件、JSON module 类型检查；不是单独运行 tsc 就完成 Client 构建。
 - `TrashService extends TypertRemoteService`，`super(ctx, 'trash', { namespace: 'trash' })`；注入 `typert/storageDomain/workspaceRegistry/sessionPersistence`，五个方法用 `@Remote` 暴露。
-- Domain：`storageDomain.open(defineDomain(...))`，懒打开且共享首次请求；打开失败清缓存允许重试；卸载等待已接纳操作后关闭 domain。schema 用 zod，domain version 仍为 1。
+- Domain：`storageDomain.open(defineDomain(...))`，懒打开且共享首次请求（包括 apply 后的后台排队扫描）；打开失败清缓存允许重试；卸载等待已接纳操作后关闭 domain。schema 用 zod，domain version 仍为 1。
 - 生成器固定为 `0.2.2-rc.5`，在临时目录读取精确依赖源码；解引用后复制，不改依赖实体/链接。生成 Host 描述、Remote contribution/codecs 与声明；esbuild 将后者和 locale 字典内联到经典 Client 脚本。
 - 包导出 `.`、`./client`、`./types`、`./typert`、`./remote`、`./locale/*.json`、`./icon`、manifest、patch；`files` 包含 dist、src、scripts、tsconfig、locale、icon、patch、docs、PLAN、双语 README、LICENSE 和 CHANGELOG。`meta.detail` 指向 `docs/DETAIL.md`。本地目录安装链接 checkout，packed 文件清单另行核验；本轮不安装。
 - 运行依赖 zod 4.6.6 与 koffi 3.1.1；Cordis peer ^4.1.0、DSH peers ^0.2.2-rc.2、官方 node-addon-system peer ^0.1.2；开发依赖保持精确版本；不在 Client 运行时 require DSH 内部包。
@@ -65,10 +66,10 @@
 
 ```text
 domain: name="trash", version=1; table: "trash"; key: SessionId
-stored: { trashedAt: number, workspaceId?: string, titleSnapshot?: string, purge?: PurgeIntent }
+stored: { trashedAt: number, workspaceId?: string, titleSnapshot?: string, deferredAt?: number, purge?: PurgeIntent }
 PurgeIntent: { source: string, target: string, dev: string, ino: string,
                deleting: boolean, logsDeleted: boolean }
-Remote TrashRecord: { trashedAt, workspaceId?, titleSnapshot?, purgePending?: boolean }
+Remote TrashRecord: { trashedAt, workspaceId?, titleSnapshot?, purgePending?: boolean, deferred?: boolean }
 ```
 
 正常收进只写 `trashedAt`；可选历史 metadata 仍兼容，工作区显示不依赖 `workspaceId`。Host 不把私有路径发到 Client。
@@ -76,10 +77,10 @@ Remote TrashRecord: { trashedAt, workspaceId?, titleSnapshot?, purgePending?: bo
 | 方法 | 当前做法与返回值 |
 | --- | --- |
 | `trashSession(id)` | 拒绝已有 purge 凭据；先归档，写 marker 前后校验 A；交错取消归档时删 marker 并抛错；`Promise<void>` |
-| `restoreSession(id)` | 拒绝已有 purge 凭据；先删 marker，再 unarchive；失败且仍归档才补回旧记录；`Promise<void>` |
-| `removeFromTrash(id)` | 先恢复全部已有凭据，再处理指定条目；普通条目必须有 marker 且仍归档；首次 stat 明确 undefined 时只清幽灵记录；成功 true；purge 阶段失败带阶段，依赖失败保留原错 |
-| `emptyTrash()` | 先恢复全部凭据，再遍历 marker ids（含待清理诊断）；普通 stale marker 仍受归档门禁；全部成功返回删除数，部分失败继续其它项并抛含成功/失败数及阶段的 AggregateError |
-| `listTrash()` | 全局边界内循环删除不带 purge 且已不归档的 stale marker；返回记录副本，带凭据者只增加 `purgePending`；不写操作日志 |
+| `restoreSession(id)` | 拒绝已有 purge 凭据；排队项只删 deferredAt、保留普通 trash；普通项先删 marker，再 unarchive；失败且仍归档才补回旧记录；`Promise<void>` |
+| `removeFromTrash(id)` | 先恢复全部已有凭据，再处理指定条目；普通条目必须有 marker 且仍归档；首次 stat 明确 undefined 时只清幽灵记录；成功 true；lock-busy 持久排队并抛 `[D_TRASH_DEFERRED]`；其余阶段失败带阶段，依赖失败保留原错 |
+| `emptyTrash()` | 先恢复全部凭据，再遍历 marker ids（含待清理诊断）；普通 stale marker 仍受归档门禁；全部成功返回删除数，部分失败继续其它项并抛含删除/失败/排队数及阶段的 AggregateError；只有排队无真失败时抛 `[D_TRASH_DEFERRED]` |
+| `listTrash()` | 全局边界内循环删除不带 purge 且已不归档的 stale marker；返回记录副本，带凭据者只增加 `purgePending`，排队项只增加 `deferred`、不暴露 deferredAt；不写操作日志 |
 
 这些操作不是跨服务事务。归档拒绝不新增 marker，即便归档已提交也保守保留；put 失败只在原先未归档且确认没有 marker 时撤销归档；不可读/unknown-state 不做危险撤销。操作和补偿都失败时 AggregateError 保留原错与补偿错误、原始 cause。
 
@@ -152,7 +153,7 @@ d-trash/
 6. **派生数据**：投影删除失败为 warning，marker 可能已清掉，后续 purge 不保证自动重试缓存；索引依赖下一次稳定搜索观测的已有同步，不保证即时消失，不手改 SQLite。不额外清理其它插件快照。
 7. **日志**：best effort、固定 4 MiB 阈值与三份归档（下一次追加前轮转，约 16 MiB，非硬上限）；无可靠 stat/source 或磁盘失败时降级 logger，不能当业务凭据或承诺每条必落盘。
 8. **原生重建**：写租约只证明当前写者排他（POSIX inode / Windows 同名信号量），不能禁止 rename 后原生重建 source；恢复/记录清理发现替代 source 会拒绝，不承诺跨进程维护事务。成员检查同样不锁住原生归属变动。
-9. **已加载会话**：已加载/已 enter 的会话因 DSH 占用官方写租约而拒绝删除；官方无供插件使用的公开卸载/close API。请切换离开到其它会话或重启 DSH 后再试；切换可能仍保留加载和租约，若仍占用请重启。绝不因锁占用而盲删或释放其它服务的句柄。
+9. **已加载会话**：lock-busy 改为持久排队，重启 DSH 后后台自动重试；仍 busy 保留到下次启动。恢复排队项只取消排队并保留归档，也可手动再次删除。服务/存储未就绪时退避重试；不保证抢在原生会话加载前拿锁。官方无公开卸载/close API，绝不绕锁、unlink 活锁文件、夺锁或释放其它服务的句柄。
 
 ### 验收标准与结果
 
@@ -248,7 +249,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 
 ### 做法：凭据与恢复
 
-每次 remove/empty 在全局边界内先扫描所有 marker 凭据；不在启动或 list 时自动物理清理。恢复失败逐条记录，继续其它条目；当前目标删除仍按自身结果返回。
+每次 remove/empty 在全局边界内先扫描所有 marker 凭据；list 不自动物理清理；启动只自动处理独立 deferredAt 排队项，不扫描普通 purge 凭据。恢复失败逐条记录，继续其它条目；当前目标删除仍按自身结果返回。
 
 - `deleteStaged` 从原 stat 保存的 source 反推 home/root；target 必须是该 home 的兄弟暂存直接子项，id 前缀匹配，dev/ino/canonical 路径匹配。source 已被重建/替换时拒绝。
 - 原 source 原 inode 尚在且 target 不存在：视为未迁移，recovery 撤销 intent；随后仍需初次删除的归档门禁。
@@ -268,7 +269,7 @@ slot 配对、实时联动、多面板、倒序响应与 empty 边界、无/迟�
 | recovery | 每个凭据的阶段与 recovery 结果（deleted/unmoved/failed） |
 
 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`，幽灵记录独立使用 `logs-absent/ok` 并注明 stat undefined、日志已不存在、只清记录；detach 按实际尝试的所属工作区记，零归属不产生 detach 行。阶段失败按实际位置记录，projection 为 warning；已有字段与路径不变，日志行数不固定。
-`unlocked/ok` 仅在已取得租约且 release 成功后写入；取锁失败无 locked/unlocked，lock-busy 顺序为 gate/ok → lock/failed → complete/failed。
+`unlocked/ok` 仅在已取得租约且 release 成功后写入；取锁失败无 locked/unlocked，当前 lock-busy 顺序为 gate/ok → lock/failed → deferred/ok → complete/deferred；排队写入失败则 deferred/failed → complete/failed。
 
 操作前预定位并缓存 home；source 移走后复用已打开 marker 的 source；否则用目标 stat、其它 marker 或 persistence.list 候选再 stat。无可靠凭据/stat 时降级 logger，不猜路径。新目录 0700，日志文件 0600 且每次打开收紧，现有 logs 目录权限不改；拒绝 home/logs symlink、文件 symlink/非普通文件；O_APPEND、不截断，同进程按路径共享串行队列。每条等待追加完成，失败降级 ctx.logger.info（带原记录及 logError）；降级也失败则吞掉，后续可重试，不改变主操作结果。固定常量 MAX_BYTES=4 MiB、KEEP=3，超过阈值后在下一次追加前删除 .3、逆序改名并新建 0600 活动文件；轮转自身写 log-rotate 记录，失败只降级 logger，原业务结果不变。跨进程旧句柄可继续写轮转文件使 .1 偏大，不承诺跨进程强一致或 fsync，日志不充当业务提交凭据。详见下方日志轮转交付章节。
 
@@ -450,7 +451,8 @@ Windows 自检命令和预期通过/跳过数见 docs/DETAIL.md 的 Windows self
 
 ### 做法
 
-- Host 的 lock-busy `PurgeError.code` 固定为 `D_TRASH_SESSION_LOCK_BUSY`，消息精确以 `[D_TRASH_SESSION_LOCK_BUSY] ` 开头，保留原阶段、id、原因及 cause。清空遇到此类失败时，汇总也带相同前缀，成功/失败数与逐项错误不丢失。
+- **历史提示方案已废弃**：只提示重启后手动删除及将 busy 计失败已由下方方案 A 的排队/启动自动重试取代；底层忙锁标记与审计条件保留。
+- Host 的底层 lock-busy `PurgeError.code` 固定为 `D_TRASH_SESSION_LOCK_BUSY`，消息精确以 `[D_TRASH_SESSION_LOCK_BUSY] ` 开头，保留原阶段、id、原因及 cause。当时清空遇到此类失败时，汇总也带相同前缀；该汇总方式现已废弃，改为方案 A 的删除/失败/排队三类计数。
 - Client 仅对删除/清空的此前缀加 locale 中的中英建议：先切换离开到其它会话或重启 DSH 后再试；切换可能仍保留加载/租约，若仍失败请重启。完整底层错误继续显示，不模糊匹配 lock/busy；跨 JS realm 的异常读取字符串 message。
 - `unlocked/ok` 显式以已取得租约且 release 成功为条件；取锁失败不写 locked/unlocked。当前工作区原实现已将 finally 放在取得租约后，本次把条件显式化并加落盘回归，不能据此认定真机旧日志来自当前源码。正常路径顺序不变。
 
@@ -462,3 +464,31 @@ Node 与 Electron 各通过 30 项日志场景（原 29 + 1，0 跳过）、37 �
 ### 明确不做什么
 
 绝不因锁占用而盲删、unlink 锁文件、强制夺锁或调用私有卸载接口；不改变原生加载/归档行为，不改核心/profile、不 install_bundle、不操作真实会话、不发布或推送。本轮为合成临时 home 回归，用户的真机调查和既有验收单独保留，不声称本轮完成真机复验；Windows 原生仍待用户代跑。
+
+
+## 已加载会话排队与启动自动删除（方案 A）— 已交付（2026-11-23）
+
+### 目标与范围
+
+仅对初次 purge 的 lock 阶段写租约 EBUSY（含官方映射的 EAGAIN/EWOULDBLOCK）排队，重启后经原安全协议自动重试。
+保留 d-trash@0.1.0、trash 内部 id、domain version 1；排队与 purge 凭据含义分开。历史「只能重启后手动删」已废弃，因为用户选择了持久排队方案。
+
+### 做法
+
+- marker 新增私有可选 `deferredAt`；首次排队时间稳定，重复 busy 不刷新。只在 `PurgeError.stage=lock/code=SessionLockBusy`、无 purge 且仍归档时 put；不改会话日志、归档、工作区归属，不写 purge intent。写入失败按 `deferred` 阶段真失败，不返回假排队确认。
+- Remote 消息精确以 `[D_TRASH_DEFERRED] ` 开头，保留底层 lock 阶段与 busy cause；`listTrash` 只增加 `deferred: true`，不暴露时间或私有路径。普通 `marker ∩ archived` 不变，原生取消归档后 list 可清普通排队 marker。
+- Cordis class-plugin 的 `[Service.init]` 在构造/apply 后投递 0ms、unref 的后台任务，立即返回。先取排队快照，再按 session 各进全局边界、重新读取 marker，逐个调用 `purgeSession`；恢复/取消、list 对账可以在条目间生效。成功正常删日志/必要记录/marker 并尝试清投影；仍 busy 保留排队，本 Host 不反复追锁，下次启动再试。其它失败按阶段报告，未进入 purge 凭据的项及服务/domain 未就绪按 1/2/4/…/30 秒退避重试；有凭据后留给既有 purge/empty 恢复协议。扫描异常隔离、不使插件启动失败，卸载取消 timer、等待已接纳操作后关 domain。
+- 真正写 intent 时移除 deferredAt；已有 purge 凭据始终优先、不参与排队扫描，也不能被恢复或重新收进丢弃。排队项点「恢复」只移除 deferredAt，日志/归档/归属与普通 marker 均保留；再次恢复才走普通 unarchive。
+- Client 行显示中英「待删除（重启 DSH 后自动完成）」；精确排队前缀用已排队 status 展示，不包装成失败，关闭已提交的确认框；删除可手动重试，恢复可取消。失败通道仍重读 Host 列表与只读 Workspace 投影。部分真失败继续显示错误，保留排队计数。
+- `deferred/ok` 审计包含 busy 原因；每项启动操作 action 为 `startup`，complete 为 ok/deferred/failed。lock 失败仍不写 locked/unlocked。empty 汇总为 deleted/failed/queued 三个计数：真失败仅计失败项并抛 AggregateError；无真失败但有排队抛 DeferredError；全成功仍返回删除数。
+
+### 验收标准与结果
+
+新增 `scripts/deferred-regressions.mjs` 接入 npm test 与安装版 discovery。13 个合成临时 home 场景覆盖真实租约排队/时间稳定/锁 inode 不变、重启自动完成与缓存/成员/归档清理、重启仍 busy 且其它项继续、恢复取消、非 lock EBUSY 拒绝排队、已开始删除凭据保留/恢复、混合与纯排队 empty 汇总、排队落盘失败、真实 Cordis 插件生命周期、stat/domain 未就绪重试、挂起维护不阻塞初始化与卸载/门禁。
+Client 覆盖精确前缀的 RemoteResult/跨 realm transport 路径、双语行/状态提示、恢复保留普通 trash、关闭确认及非精确标记拒绝识别。
+`npm run build`、`npm test`、`npm run test:discovery`、`npm pack --dry-run --json` 均退出 0。Node 26.10.0 与安装版 Electron 44.7.0 / Node 24.21.0 / DSH 0.2.2-rc.5 各通过新增 13 项排队、原 37 项文件系统、30 项日志与 18 项幽灵回归；平台各 4 项通过、6 项 Windows-only 明确跳过。discovery 确认官方租约双向互斥、五个 Remote 和四个 slot。pack 使用临时 cache，含 69 个文件和新回归，无 CODEX 报告。详细证据见本地 `CODEX_DEFERRED.md`；本轮仅隔离验收，历史真机记录不算本轮复验。Windows 原生仍待用户代跑。
+
+### 明确不做什么
+
+不绕过写锁、不 unlink 活锁文件、不夺锁、不调用私有卸载 API；不改 DSH 核心/profile、不 install_bundle、不碰真实会话、不发布或推送。
+不扩大删除/保留范围，不把排队当 purge 凭据，不在启动恢复无排队的既有 purge 凭据，不保证原生加载前抢先完成或跨服务事务。

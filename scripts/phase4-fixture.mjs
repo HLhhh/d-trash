@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 // All file paths belong to an explicit fresh temporary home. The persistence
 // observation is a seam; actual filesystem safety, native flock and I/O are not.
-export async function fixture(existingHome) {
+export async function fixture(existingHome, { start = false } = {}) {
   const previousHome = process.env.DSH_HOME
   const home = existingHome ?? await realpath(await mkdtemp(join(tmpdir(), 'trash-phase4-')))
   // The app Host has no DSH_HOME; only the tool shell receives that hint.
@@ -63,7 +63,12 @@ export async function fixture(existingHome) {
   ctx.provide('sessionPersistence', { stat: observe, async list() {
     return (await Promise.all([...members].map(observe))).filter(Boolean)
   } })
-  const trash = new TrashService(ctx)
+  let trash
+  if (start) {
+    ctx.provide('typert', {})
+    await ctx.plugin(TrashService)
+    trash = ctx.get('trash')
+  } else trash = new TrashService(ctx)
   const report = trash.report.bind(trash)
   trash.report = async (sessionId, stage, result, error) => {
     await report(sessionId, stage, result, error)

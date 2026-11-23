@@ -329,6 +329,7 @@ async function main() {
   await import('./phase4-regressions.mjs')
   await import('./ghost-regressions.mjs')
   await import('./operation-log-regressions.mjs')
+  await import('./deferred-regressions.mjs')
   assert.deepEqual(hashes(), before, 'Protected documents and real profile files must remain unchanged')
   console.log('PASS: installed resolver, Typert scan/cache, real Loader/ClientModules, Gateway inject reproduction and slot RPC lifecycle; profile unchanged')
 }

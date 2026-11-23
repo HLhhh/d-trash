@@ -1,4 +1,4 @@
-import type { Context } from '@deepseek-ai/cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
 import { defineDomain, domainTable, type Domain } from '@deepseek-ai/dsh-storage-domain'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { SessionPurger, PurgeError, type PurgeIntent } from './purge.js'
-import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX, type TrashRecord } from './types.js'
+import { TrashErrorCode, DeferredError, type TrashRecord } from './types.js'
 import { OperationLog, type TrashAction } from './operation-log.js'
 
 export type { TrashRecord } from './types.js'
@@ -18,7 +18,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-interface StoredTrashRecord extends TrashRecord { purge?: PurgeIntent }
+interface StoredTrashRecord extends TrashRecord { purge?: PurgeIntent; deferredAt?: number }
 
 const trashDomain = defineDomain({
   name: 'trash',
@@ -28,6 +28,7 @@ const trashDomain = defineDomain({
       trashedAt: z.number(),
       workspaceId: z.string().optional(),
       titleSnapshot: z.string().optional(),
+      deferredAt: z.number().optional(),
       purge: z.object({ source: z.string(), target: z.string(), dev: z.string(), ino: z.string(),
         logsDeleted: z.boolean(), deleting: z.boolean() }).optional(),
     })),
@@ -45,6 +46,10 @@ export default class TrashService extends TypertRemoteService {
   private persistenceHome?: string
   private readonly sessions = new Map<SessionId, Promise<void>>()
   private boundary: Promise<void> = Promise.resolve()
+  private stopped = false
+  private startupTimer?: ReturnType<typeof setTimeout>
+  private startupStarted = false
+  private readonly startupSettled = new Set<SessionId>()
 
   constructor(ctx: Context) {
     super(ctx, 'trash', { namespace: 'trash' })
@@ -55,12 +60,62 @@ export default class TrashService extends TypertRemoteService {
     }, (id, stage) => this.report(id, stage, 'ok'))
     this.operationLog = new OperationLog(id => this.logHome(id), line => this.ctx.logger.info(line))
     ctx.effect(() => async () => {
+      this.stopped = true
+      clearTimeout(this.startupTimer)
       await this.exclusive(async () => {
         // An unsuccessful open owns no handle; close failures still propagate.
         const domain = await this.domainPromise?.catch(() => undefined)
         await domain?.close()
       })
     })
+  }
+
+  /** Cordis class-plugin apply hook. Return immediately; never await maintenance. */
+  [Service.init](): void {
+    if (this.startupStarted || this.stopped) return
+    this.startupStarted = true
+    this.scheduleStartup(0)
+  }
+
+  private scheduleStartup(delay: number): void {
+    if (this.stopped) return
+    this.startupTimer = setTimeout(() => {
+      if (this.stopped) return
+      void this.retryDeferred().then(retry => {
+        if (retry) this.scheduleStartup(Math.min(30_000, Math.max(1000, delay * 2)))
+      }).catch(async error => {
+        await this.action.run('startup', () => this.report(null, 'scan', 'failed', error))
+        this.scheduleStartup(Math.min(30_000, Math.max(1000, delay * 2)))
+      }).catch(() => { /* maintenance must never reject into Host startup */ })
+    }, delay)
+    this.startupTimer.unref()
+  }
+
+  private async retryDeferred(): Promise<boolean> {
+    // Dependency/domain readiness may lag apply. Retry safely with backoff.
+    this.workspaceRegistry()
+    if (!this.ctx.get('sessionPersistence')) throw new Error('TrashService requires sessionPersistence')
+    const ids = await this.exclusive(async () => [...(await this.domain()).table('trash').entries()]
+      .filter(([id, record]) => record.deferredAt !== undefined && !record.purge && !this.startupSettled.has(id))
+      .map(([id]) => id))
+    let retry = false
+    for (const id of ids) {
+      if (this.stopped) break
+      await this.exclusive(async () => {
+        if (this.stopped) return
+        const record = (await this.domain()).table('trash').get(id)
+        // Restore/list/re-trash can cancel between items. Receipts use recovery only.
+        if (!record || record.deferredAt === undefined || record.purge) return
+        try {
+          await this.operation('startup', id, () => this.purgeSession(id))
+          this.startupSettled.add(id)
+        } catch (error) {
+          if (error instanceof DeferredError) this.startupSettled.add(id)
+          else retry = true // includes a persistence service that is not ready yet
+        }
+      })
+    }
+    return retry
   }
 
   /**
@@ -107,6 +162,11 @@ export default class TrashService extends TypertRemoteService {
       const registry = this.workspaceRegistry()
       const record = table.get(sessionId)
       if (record?.purge) throw new PurgeError(sessionId, 'gate', 'Deletion is pending; session cannot be restored')
+      if (record?.deferredAt !== undefined) {
+        const { deferredAt: _, ...original } = record
+        await table.put(sessionId, original)
+        return // Cancel queued deletion; keep the session in ordinary trash.
+      }
       await table.delete(sessionId)
       try {
         await registry.unarchiveSession(sessionId)
@@ -135,22 +195,25 @@ export default class TrashService extends TypertRemoteService {
   async emptyTrash(): Promise<number> {
     let deleted = 0
     let failed = 0
+    let deferred = 0
     return this.exclusive(() => this.operation('emptyTrash', null, async () => {
       await this.recoverStaging()
       const ids = [...(await this.domain()).table('trash').keys()]
       const failures: unknown[] = []
       for (const id of ids) {
         try { if (await this.operation('emptyTrash', id, () => this.purgeSession(id))) deleted++ }
-        catch (error) { failures.push(error); failed++ }
+        catch (error) {
+          if (error instanceof DeferredError) deferred++
+          else { failures.push(error); failed++ }
+        }
       }
       if (failures.length) {
-        const prefix = failures.some(error => error instanceof PurgeError && error.code === TrashErrorCode.SessionLockBusy)
-          ? SESSION_LOCK_BUSY_PREFIX : ''
         throw new AggregateError(failures,
-          `${prefix}Physical deletion: ${deleted} deleted, ${failures.length} failed: ${failures.map(String).join('; ')}`)
+          `Physical deletion: ${deleted} deleted, ${failed} failed, ${deferred} queued: ${failures.map(String).join('; ')}`)
       }
+      if (deferred) throw new DeferredError(`Physical deletion: ${deleted} deleted, 0 failed, ${deferred} queued`, undefined)
       return deleted
-    }, 'summary', () => `${deleted} deleted, ${failed} failed`))
+    }, 'summary', () => `${deleted} deleted, ${failed} failed, ${deferred} queued`))
   }
 
   private async report(sessionId: SessionId | null, stage: string, result: string, error?: unknown): Promise<void> {
@@ -166,7 +229,7 @@ export default class TrashService extends TypertRemoteService {
         await this.report(id, stage, 'ok', reason?.())
         return result
       } catch (error) {
-        await this.report(id, stage, 'failed', error)
+        await this.report(id, stage, error instanceof DeferredError ? 'deferred' : 'failed', error)
         throw error
       }
     })
@@ -238,7 +301,8 @@ export default class TrashService extends TypertRemoteService {
           }
         }
         const moved = await this.purger.move(sessionId, gate, async purge => {
-          await table.put(sessionId, { ...original, purge: { ...purge } })
+          const { deferredAt: _, ...started } = original
+          await table.put(sessionId, { ...started, purge: { ...purge } })
         })
         if (moved === 'logs-absent') {
           await this.report(sessionId, 'logs-absent', 'ok', 'stat returned undefined; local logs already absent; cleaning records only')
@@ -279,6 +343,18 @@ export default class TrashService extends TypertRemoteService {
     } catch (error) {
       const failure = error instanceof PurgeError ? error : new PurgeError(sessionId, stage, error)
       await this.report(sessionId, failure.stage, 'failed', failure)
+      const current = table.get(sessionId)
+      if (failure.stage === 'lock' && failure.code === TrashErrorCode.SessionLockBusy
+        && current && !current.purge && registry.archivedSessionIds.includes(sessionId)) {
+        try { await table.put(sessionId, { ...current, deferredAt: current.deferredAt ?? Date.now() }) }
+        catch (saveError) {
+          const rejected = new PurgeError(sessionId, 'deferred', saveError)
+          await this.report(sessionId, 'deferred', 'failed', rejected)
+          throw rejected
+        }
+        await this.report(sessionId, 'deferred', 'ok', failure)
+        throw new DeferredError(`Queued for deletion after DSH restart: ${failure.message}`, failure)
+      }
       throw failure
     }
   }
@@ -298,8 +374,9 @@ export default class TrashService extends TypertRemoteService {
         const entries = [...table.entries()]
         const stale = entries.filter(([id, record]) => !record.purge && !archived.has(id)).map(([id]) => id)
         if (!stale.length) return entries.map(([id, record]) => {
-          const { purge, ...visible } = record
-          return [id, { ...visible, ...(purge ? { purgePending: true } : {}) }]
+          const { purge, deferredAt, ...visible } = record
+          return [id, { ...visible, ...(purge ? { purgePending: true } : {}),
+            ...(deferredAt !== undefined && !purge ? { deferred: true } : {}) }]
         })
         await table.deleteMany(stale)
         // Native unarchive can run during persistence; check again before

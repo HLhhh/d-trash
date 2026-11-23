@@ -32,12 +32,13 @@ var __esDecorate = (this && this.__esDecorate) || function (ctor, descriptorIn, 
     if (target) Object.defineProperty(target, contextIn.name, descriptor);
     done = true;
 };
+import { Service } from '@deepseek-ai/cordis';
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { z } from 'zod';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { SessionPurger, PurgeError } from './purge.js';
-import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX } from './types.js';
+import { TrashErrorCode, DeferredError } from './types.js';
 import { OperationLog } from './operation-log.js';
 const trashDomain = defineDomain({
     name: 'trash',
@@ -47,6 +48,7 @@ const trashDomain = defineDomain({
             trashedAt: z.number(),
             workspaceId: z.string().optional(),
             titleSnapshot: z.string().optional(),
+            deferredAt: z.number().optional(),
             purge: z.object({ source: z.string(), target: z.string(), dev: z.string(), ino: z.string(),
                 logsDeleted: z.boolean(), deleting: z.boolean() }).optional(),
         })),
@@ -83,6 +85,10 @@ let TrashService = (() => {
         persistenceHome;
         sessions = new Map();
         boundary = Promise.resolve();
+        stopped = false;
+        startupTimer;
+        startupStarted = false;
+        startupSettled = new Set();
         constructor(ctx) {
             super(ctx, 'trash', { namespace: 'trash' });
             this.purger = new SessionPurger(async (id) => {
@@ -93,12 +99,70 @@ let TrashService = (() => {
             }, (id, stage) => this.report(id, stage, 'ok'));
             this.operationLog = new OperationLog(id => this.logHome(id), line => this.ctx.logger.info(line));
             ctx.effect(() => async () => {
+                this.stopped = true;
+                clearTimeout(this.startupTimer);
                 await this.exclusive(async () => {
                     // An unsuccessful open owns no handle; close failures still propagate.
                     const domain = await this.domainPromise?.catch(() => undefined);
                     await domain?.close();
                 });
             });
+        }
+        /** Cordis class-plugin apply hook. Return immediately; never await maintenance. */
+        [Service.init]() {
+            if (this.startupStarted || this.stopped)
+                return;
+            this.startupStarted = true;
+            this.scheduleStartup(0);
+        }
+        scheduleStartup(delay) {
+            if (this.stopped)
+                return;
+            this.startupTimer = setTimeout(() => {
+                if (this.stopped)
+                    return;
+                void this.retryDeferred().then(retry => {
+                    if (retry)
+                        this.scheduleStartup(Math.min(30_000, Math.max(1000, delay * 2)));
+                }).catch(async (error) => {
+                    await this.action.run('startup', () => this.report(null, 'scan', 'failed', error));
+                    this.scheduleStartup(Math.min(30_000, Math.max(1000, delay * 2)));
+                }).catch(() => { });
+            }, delay);
+            this.startupTimer.unref();
+        }
+        async retryDeferred() {
+            // Dependency/domain readiness may lag apply. Retry safely with backoff.
+            this.workspaceRegistry();
+            if (!this.ctx.get('sessionPersistence'))
+                throw new Error('TrashService requires sessionPersistence');
+            const ids = await this.exclusive(async () => [...(await this.domain()).table('trash').entries()]
+                .filter(([id, record]) => record.deferredAt !== undefined && !record.purge && !this.startupSettled.has(id))
+                .map(([id]) => id));
+            let retry = false;
+            for (const id of ids) {
+                if (this.stopped)
+                    break;
+                await this.exclusive(async () => {
+                    if (this.stopped)
+                        return;
+                    const record = (await this.domain()).table('trash').get(id);
+                    // Restore/list/re-trash can cancel between items. Receipts use recovery only.
+                    if (!record || record.deferredAt === undefined || record.purge)
+                        return;
+                    try {
+                        await this.operation('startup', id, () => this.purgeSession(id));
+                        this.startupSettled.add(id);
+                    }
+                    catch (error) {
+                        if (error instanceof DeferredError)
+                            this.startupSettled.add(id);
+                        else
+                            retry = true; // includes a persistence service that is not ready yet
+                    }
+                });
+            }
+            return retry;
         }
         /**
          * Observable trash = marker ∩ archived. Native unarchive bypasses our lock;
@@ -144,6 +208,11 @@ let TrashService = (() => {
                 const record = table.get(sessionId);
                 if (record?.purge)
                     throw new PurgeError(sessionId, 'gate', 'Deletion is pending; session cannot be restored');
+                if (record?.deferredAt !== undefined) {
+                    const { deferredAt: _, ...original } = record;
+                    await table.put(sessionId, original);
+                    return; // Cancel queued deletion; keep the session in ordinary trash.
+                }
                 await table.delete(sessionId);
                 try {
                     await registry.unarchiveSession(sessionId);
@@ -169,6 +238,7 @@ let TrashService = (() => {
         async emptyTrash() {
             let deleted = 0;
             let failed = 0;
+            let deferred = 0;
             return this.exclusive(() => this.operation('emptyTrash', null, async () => {
                 await this.recoverStaging();
                 const ids = [...(await this.domain()).table('trash').keys()];
@@ -179,17 +249,21 @@ let TrashService = (() => {
                             deleted++;
                     }
                     catch (error) {
-                        failures.push(error);
-                        failed++;
+                        if (error instanceof DeferredError)
+                            deferred++;
+                        else {
+                            failures.push(error);
+                            failed++;
+                        }
                     }
                 }
                 if (failures.length) {
-                    const prefix = failures.some(error => error instanceof PurgeError && error.code === TrashErrorCode.SessionLockBusy)
-                        ? SESSION_LOCK_BUSY_PREFIX : '';
-                    throw new AggregateError(failures, `${prefix}Physical deletion: ${deleted} deleted, ${failures.length} failed: ${failures.map(String).join('; ')}`);
+                    throw new AggregateError(failures, `Physical deletion: ${deleted} deleted, ${failed} failed, ${deferred} queued: ${failures.map(String).join('; ')}`);
                 }
+                if (deferred)
+                    throw new DeferredError(`Physical deletion: ${deleted} deleted, 0 failed, ${deferred} queued`, undefined);
                 return deleted;
-            }, 'summary', () => `${deleted} deleted, ${failed} failed`));
+            }, 'summary', () => `${deleted} deleted, ${failed} failed, ${deferred} queued`));
         }
         async report(sessionId, stage, result, error) {
             await this.operationLog.write(this.action.getStore() ?? 'removeFromTrash', sessionId, stage, result, error);
@@ -203,7 +277,7 @@ let TrashService = (() => {
                     return result;
                 }
                 catch (error) {
-                    await this.report(id, stage, 'failed', error);
+                    await this.report(id, stage, error instanceof DeferredError ? 'deferred' : 'failed', error);
                     throw error;
                 }
             });
@@ -291,7 +365,8 @@ let TrashService = (() => {
                         }
                     };
                     const moved = await this.purger.move(sessionId, gate, async (purge) => {
-                        await table.put(sessionId, { ...original, purge: { ...purge } });
+                        const { deferredAt: _, ...started } = original;
+                        await table.put(sessionId, { ...started, purge: { ...purge } });
                     });
                     if (moved === 'logs-absent') {
                         await this.report(sessionId, 'logs-absent', 'ok', 'stat returned undefined; local logs already absent; cleaning records only');
@@ -343,6 +418,20 @@ let TrashService = (() => {
             catch (error) {
                 const failure = error instanceof PurgeError ? error : new PurgeError(sessionId, stage, error);
                 await this.report(sessionId, failure.stage, 'failed', failure);
+                const current = table.get(sessionId);
+                if (failure.stage === 'lock' && failure.code === TrashErrorCode.SessionLockBusy
+                    && current && !current.purge && registry.archivedSessionIds.includes(sessionId)) {
+                    try {
+                        await table.put(sessionId, { ...current, deferredAt: current.deferredAt ?? Date.now() });
+                    }
+                    catch (saveError) {
+                        const rejected = new PurgeError(sessionId, 'deferred', saveError);
+                        await this.report(sessionId, 'deferred', 'failed', rejected);
+                        throw rejected;
+                    }
+                    await this.report(sessionId, 'deferred', 'ok', failure);
+                    throw new DeferredError(`Queued for deletion after DSH restart: ${failure.message}`, failure);
+                }
                 throw failure;
             }
         }
@@ -361,8 +450,9 @@ let TrashService = (() => {
                     const stale = entries.filter(([id, record]) => !record.purge && !archived.has(id)).map(([id]) => id);
                     if (!stale.length)
                         return entries.map(([id, record]) => {
-                            const { purge, ...visible } = record;
-                            return [id, { ...visible, ...(purge ? { purgePending: true } : {}) }];
+                            const { purge, deferredAt, ...visible } = record;
+                            return [id, { ...visible, ...(purge ? { purgePending: true } : {}),
+                                    ...(deferredAt !== undefined && !purge ? { deferred: true } : {}) }];
                         });
                     await table.deleteMany(stale);
                     // Native unarchive can run during persistence; check again before

@@ -1,5 +1,5 @@
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
-import { SESSION_LOCK_BUSY_PREFIX, type TrashRecord } from './types.js'
+import { SESSION_LOCK_BUSY_PREFIX, DEFERRED_PREFIX, type TrashRecord } from './types.js'
 import { copy, type CopyKey } from './client-copy.js'
 import { trashStore, type TrashEntries } from './client-store.js'
 import { WorkspaceSync, type WorkspaceProjection, type WorkspaceReader } from './workspace-sync.js'
@@ -196,6 +196,7 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
               t('trashedAt', { time: validDate ? date.toLocaleString(props.getLocale()) : t('unknownTime') }))),
           h('p', { className: 'trash-panel-meta' }, t('workspace', { workspace: workspace || t('noWorkspace') })),
           record.purgePending && h('p', { className: 'trash-panel-note' }, t('purgePending')),
+          record.deferred && h('p', { className: 'trash-panel-note' }, t('deferred')),
           h('div', { className: 'trash-panel-actions' },
             h('button', { type: 'button', disabled: props.pending || record.purgePending, onClick: props.onRestore }, t('restore')),
             h('button', { type: 'button', className: 'trash-danger', disabled: props.pending, onClick: props.onDelete }, t('deleteForever'))),
@@ -241,8 +242,13 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
             failureKey = 'loadFailed'
             await reload()
           } catch (reason: unknown) {
-            if (mounted.current) setFailure({ key: failureKey,
-              reason: errorMessage(reason) })
+            if (mounted.current) {
+              const message = errorMessage(reason)
+              if ((failureKey === 'deleteFailed' || failureKey === 'emptyFailed') && message.startsWith(DEFERRED_PREFIX)) {
+                setConfirmation(null)
+              }
+              setFailure({ key: failureKey, reason: message })
+            }
           } finally {
             busy.current = false
             if (mounted.current) setPending(false)
@@ -272,10 +278,12 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
                 h('button', { type: 'button', className: 'trash-danger', disabled: pending || !entries?.length,
                   onClick: () => setConfirmation({ kind: 'empty' }) }, t('emptyTrash')))),
             h('p', { className: 'trash-panel-note' }, t('physicalDeletion')),
-            failure && h('div', { className: 'trash-error', role: 'alert' },
+            failure && ((failure.key === 'deleteFailed' || failure.key === 'emptyFailed') && failure.reason.startsWith(DEFERRED_PREFIX)
+              ? h('div', { className: 'trash-panel-note', role: 'status' }, t('deferredNotice', { reason: failure.reason }))
+              : h('div', { className: 'trash-error', role: 'alert' },
               (failure.key === 'deleteFailed' || failure.key === 'emptyFailed')
                 && failure.reason.startsWith(SESSION_LOCK_BUSY_PREFIX) && h('p', null, t('sessionLockBusy')),
-              t(failure.key, { reason: failure.reason })),
+              t(failure.key, { reason: failure.reason }))),
             pending && h('p', { role: 'status' }, t(entries === null ? 'loading' : 'working')),
             confirmation?.kind === 'empty' && h('div', { className: 'trash-panel-confirm', role: 'group',
               'aria-label': t('confirmEmpty'), onKeyDown: (event: KeyboardEvent) => {
@@ -447,7 +455,13 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
           const trash: TrashRemote = {
             trashSession: id => write(id, () => host.trashSession(id),
               () => trashStore.upsert(id, { trashedAt: Date.now() })),
-            restoreSession: id => write(id, () => host.restoreSession(id), () => trashStore.remove(id)),
+            restoreSession: id => write(id, () => host.restoreSession(id), () => {
+              const record = trashStore.getSnapshot()?.find(([key]) => key === id)?.[1]
+              if (record?.deferred) {
+                const { deferred: _, ...ordinary } = record
+                trashStore.upsert(id, ordinary)
+              } else trashStore.remove(id)
+            }),
             removeFromTrash: id => write(id, () => host.removeFromTrash(id), () => trashStore.remove(id)),
             emptyTrash: () => write(undefined, () => host.emptyTrash(), () => trashStore.clear()),
             listTrash: async () => {

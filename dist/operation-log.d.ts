@@ -1,5 +1,5 @@
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
-export type TrashAction = 'trashSession' | 'restoreSession' | 'removeFromTrash' | 'emptyTrash' | 'recovery' | 'log-rotate';
+export type TrashAction = 'trashSession' | 'restoreSession' | 'removeFromTrash' | 'emptyTrash' | 'startup' | 'recovery' | 'log-rotate';
 export interface OperationRecord {
     ts: string;
     action: TrashAction;

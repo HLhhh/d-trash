@@ -7,6 +7,7 @@
 
   // src/types.ts
   var SESSION_LOCK_BUSY_PREFIX = `[${"D_TRASH_SESSION_LOCK_BUSY" /* SessionLockBusy */}] `;
+  var DEFERRED_PREFIX = `[${"D_TRASH_DEFERRED" /* Deferred */}] `;
 
   // locale/en.json
   var en_default = {
@@ -40,7 +41,9 @@
       unknownTime: "Unknown time",
       noWorkspace: "No workspace",
       physicalDeletion: "Physical deletion permanently removes local session logs and cannot be undone.",
-      purgePending: "Deletion is unfinished. Retry physical deletion to complete cleanup."
+      purgePending: "Deletion is unfinished. Retry physical deletion to complete cleanup.",
+      deferred: "Pending deletion (automatically completes after restarting DSH)",
+      deferredNotice: "Queued for deletion. Restart DSH to complete it; Restore cancels the queue. {reason}"
     }
   };
 
@@ -76,7 +79,9 @@
       unknownTime: "\u65F6\u95F4\u672A\u77E5",
       noWorkspace: "\u65E0\u6240\u5C5E\u5DE5\u4F5C\u533A",
       physicalDeletion: "\u7269\u7406\u5220\u9664\u5C06\u6C38\u4E45\u79FB\u9664\u672C\u5730\u4F1A\u8BDD\u65E5\u5FD7\uFF0C\u4E0D\u53EF\u6062\u590D\u3002",
-      purgePending: "\u5220\u9664\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u7269\u7406\u5220\u9664\u4EE5\u5B8C\u6210\u6E05\u7406\u3002"
+      purgePending: "\u5220\u9664\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u7269\u7406\u5220\u9664\u4EE5\u5B8C\u6210\u6E05\u7406\u3002",
+      deferred: "\u5F85\u5220\u9664\uFF08\u91CD\u542F DSH \u540E\u81EA\u52A8\u5B8C\u6210\uFF09",
+      deferredNotice: "\u5DF2\u6392\u961F\u3002\u91CD\u542F DSH \u540E\u81EA\u52A8\u5B8C\u6210\uFF1B\u6062\u590D\u53EF\u53D6\u6D88\u6392\u961F\u3002{reason}"
     }
   };
 
@@ -351,6 +356,7 @@
             ),
             h("p", { className: "trash-panel-meta" }, t("workspace", { workspace: workspace || t("noWorkspace") })),
             record2.purgePending && h("p", { className: "trash-panel-note" }, t("purgePending")),
+            record2.deferred && h("p", { className: "trash-panel-note" }, t("deferred")),
             h(
               "div",
               { className: "trash-panel-actions" },
@@ -410,10 +416,13 @@
               failureKey = "loadFailed";
               await reload();
             } catch (reason) {
-              if (mounted.current) setFailure({
-                key: failureKey,
-                reason: errorMessage(reason)
-              });
+              if (mounted.current) {
+                const message = errorMessage(reason);
+                if ((failureKey === "deleteFailed" || failureKey === "emptyFailed") && message.startsWith(DEFERRED_PREFIX)) {
+                  setConfirmation(null);
+                }
+                setFailure({ key: failureKey, reason: message });
+              }
             } finally {
               busy.current = false;
               if (mounted.current) setPending(false);
@@ -467,12 +476,12 @@
                 )
               ),
               h("p", { className: "trash-panel-note" }, t("physicalDeletion")),
-              failure2 && h(
+              failure2 && ((failure2.key === "deleteFailed" || failure2.key === "emptyFailed") && failure2.reason.startsWith(DEFERRED_PREFIX) ? h("div", { className: "trash-panel-note", role: "status" }, t("deferredNotice", { reason: failure2.reason })) : h(
                 "div",
                 { className: "trash-error", role: "alert" },
                 (failure2.key === "deleteFailed" || failure2.key === "emptyFailed") && failure2.reason.startsWith(SESSION_LOCK_BUSY_PREFIX) && h("p", null, t("sessionLockBusy")),
                 t(failure2.key, { reason: failure2.reason })
-              ),
+              )),
               pending && h("p", { role: "status" }, t(entries === null ? "loading" : "working")),
               confirmation?.kind === "empty" && h(
                 "div",
@@ -716,7 +725,13 @@
                 () => host.trashSession(id),
                 () => trashStore.upsert(id, { trashedAt: Date.now() })
               ),
-              restoreSession: (id) => write(id, () => host.restoreSession(id), () => trashStore.remove(id)),
+              restoreSession: (id) => write(id, () => host.restoreSession(id), () => {
+                const record2 = trashStore.getSnapshot()?.find(([key]) => key === id)?.[1];
+                if (record2?.deferred) {
+                  const { deferred: _, ...ordinary } = record2;
+                  trashStore.upsert(id, ordinary);
+                } else trashStore.remove(id);
+              }),
               removeFromTrash: (id) => write(id, () => host.removeFromTrash(id), () => trashStore.remove(id)),
               emptyTrash: () => write(void 0, () => host.emptyTrash(), () => trashStore.clear()),
               listTrash: async () => {
@@ -20632,6 +20647,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   var d_trash_trash_listTrash_result$schema$value;
   var d_trash_trash_listTrash_result$schema = () => d_trash_trash_listTrash_result$schema$value ??= external_exports.array(external_exports.tuple([external_exports.string(), external_exports.object({
     "purgePending": external_exports.union([external_exports.undefined(), external_exports.literal(false), external_exports.literal(true)]).optional().describe("Host retains a private purge receipt; show diagnosis and allow deletion retry."),
+    "deferred": external_exports.union([external_exports.undefined(), external_exports.literal(false), external_exports.literal(true)]).optional().describe("Queued before deletion starts; Restore cancels the queue."),
     "trashedAt": external_exports.number(),
     "workspaceId": external_exports.union([external_exports.undefined(), external_exports.string()]).optional(),
     "titleSnapshot": external_exports.union([external_exports.undefined(), external_exports.string()]).optional()
@@ -20668,7 +20684,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_emptyTrash_result$schema,
           jsonSchema: { "type": "number" }
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 135, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 195, "column": 9 }
       },
       "trash/listTrash": {
         service: "trash",
@@ -20681,7 +20697,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_listTrash_result$schema,
           jsonSchemaError: "typert tool schema: unsupported selected tuple type"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 288, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 364, "column": 9 }
       },
       "trash/removeFromTrash": {
         service: "trash",
@@ -20711,7 +20727,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_removeFromTrash_result$schema,
           jsonSchema: { "type": "boolean" }
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 126, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 186, "column": 9 }
       },
       "trash/restoreSession": {
         service: "trash",
@@ -20741,7 +20757,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_restoreSession_result$schema,
           jsonSchemaError: "typert tool schema: unsupported void value"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 104, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 159, "column": 9 }
       },
       "trash/trashSession": {
         service: "trash",
@@ -20771,7 +20787,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_trashSession_result$schema,
           jsonSchemaError: "typert tool schema: unsupported void value"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 72, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 127, "column": 9 }
       }
     }
   }, external_exports);

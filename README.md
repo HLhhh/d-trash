@@ -15,7 +15,8 @@ Long session histories make the sidebar hard to navigate. Native archiving hides
 - **Move to Trash** from a session's context menu or hover action; keep its logs and workspace membership.
 - **Restore** a session by unarchiving it and keeping its current workspace position.
 - **Delete forever** after confirmation; remove local session logs and necessary registry records. This cannot be undone.
-- **Empty Trash** across workspaces, with per-session failures retained for retry.
+- **Queue busy sessions** for automatic deletion after restarting DSH; Restore cancels the queue.
+- **Empty Trash** across workspaces, with separate deleted, queued, and failed counts.
 - **Audit operations** in a local JSONL log, with stages and failure reasons.
 
 The global panel lists sessions newest first, with titles, current workspaces, and English/Chinese UI text.
@@ -52,7 +53,7 @@ These instructions do not assume an npm release; do not use a bare `d-trash` reg
 | Panel → Empty Trash | Confirm permanent deletion of all Trash sessions |
 | Panel → Refresh | Reload the list and workspace projection |
 
-Deletion requires inline confirmation; Cancel or Escape dismisses it. A pending deletion cannot be restored or moved to Trash again: retry deletion to finish its recorded cleanup.
+Deletion requires inline confirmation; Cancel or Escape dismisses it. A queued session shows “Pending deletion (automatically completes after restarting DSH)”. Restore cancels its queue and keeps it archived in Trash with its logs and workspace membership; a later Restore uses the ordinary unarchive behavior. Once physical deletion has started and a purge receipt exists, Restore is disabled: retry deletion to finish cleanup.
 
 ## How it works
 
@@ -81,7 +82,7 @@ Peer ranges allow compatible updates; they do not mean later DSH versions have b
 
 ## Known limitations
 
-- Loaded/entered sessions are refused deletion while DSH holds the official write lease. There is no public unload/close API for the plugin to release it. Switch to another session or restart DSH, then retry; switching may leave the loaded session locked, in which case restart DSH. The Client shows this advice in English/Chinese and retains the underlying error. Lock contention never authorizes deletion without a lease.
+- Loaded/entered sessions can remain locked by DSH. Delete/Empty queues lock-busy sessions without changing their logs, archive state, or workspace membership. Restart DSH to let the Host retry automatically; if a session is still busy it stays queued for the next restart, and Delete forever can also retry manually. Startup maintenance runs in the background, retries unavailable services with backoff, and reports other errors by stage. There is no public unload/close API; the plugin never releases another owner’s handle, bypasses a lease, unlinks a live lock file, or steals a lock.
 - Attachments, workspace files, Git worktrees, artifacts, server logs, backups, and other plugins' snapshots remain.
 - Deletion is not secure erasure. Search results may take time to converge through DSH's existing synchronization; cache cleanup failures are warnings.
 - Trash sessions remain archived, so native views configured to show archived/all sessions can still display them.
@@ -92,7 +93,7 @@ Peer ranges allow compatible updates; they do not mean later DSH versions have b
 
 The log is **`<home>/logs/trash.log`**, normally **`~/.dsh/logs/trash.log`**. The Host derives and validates `home` from the persistence stat/source path, not from the `DSH_HOME` environment variable. For a custom home, use that home in the commands below.
 
-Each JSONL line contains **`ts`**, **`action`**, **`sessionId`**, **`stage`**, **`result`**, and **`reason`**. `ts` is ISO time; `reason` is `null` when there is no reason, and empty-trash summaries use `sessionId: null`. Actions include `trashSession`, `restoreSession`, `removeFromTrash`, `emptyTrash`, `recovery`, and `log-rotate`.
+Each JSONL line contains **`ts`**, **`action`**, **`sessionId`**, **`stage`**, **`result`**, and **`reason`**. `ts` is ISO time; `reason` is `null` when there is no reason, and empty-trash summaries use `sessionId: null`. Actions include `trashSession`, `restoreSession`, `removeFromTrash`, `emptyTrash`, `recovery`, `startup`, and `log-rotate`. Queue acknowledgement records `deferred/ok`; Empty Trash summaries distinguish deleted, failed, and queued counts. The stable `[D_TRASH_DEFERRED] ` wire prefix is shown as a queued status instead of a deletion failure.
 
 ```sh
 tail -F ~/.dsh/logs/trash.log

@@ -8,6 +8,7 @@ const d_trash_trash_emptyTrash_result$schema = () => (d_trash_trash_emptyTrash_r
 let d_trash_trash_listTrash_result$schema$value
 const d_trash_trash_listTrash_result$schema = () => (d_trash_trash_listTrash_result$schema$value ??= z.array(z.tuple([z.string(), z.object({
   'purgePending': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional().describe('Host retains a private purge receipt; show diagnosis and allow deletion retry.'),
+  'deferred': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional().describe('Queued before deletion starts; Restore cancels the queue.'),
   'trashedAt': z.number(),
   'workspaceId': z.union([z.undefined(), z.string()]).optional(),
   'titleSnapshot': z.union([z.undefined(), z.string()]).optional(),
@@ -46,7 +47,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_emptyTrash_result$schema,
         jsonSchema: {"type":"number"},
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":135,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":195,"column":9},
     },
     'trash/listTrash': {
       service: 'trash',
@@ -60,7 +61,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_listTrash_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported selected tuple type',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":288,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":364,"column":9},
     },
     'trash/removeFromTrash': {
       service: 'trash',
@@ -90,7 +91,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_removeFromTrash_result$schema,
         jsonSchema: {"type":"boolean"},
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":126,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":186,"column":9},
     },
     'trash/restoreSession': {
       service: 'trash',
@@ -120,7 +121,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_restoreSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":104,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":159,"column":9},
     },
     'trash/trashSession': {
       service: 'trash',
@@ -150,7 +151,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_trashSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":72,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":127,"column":9},
     },
   },
 }, z)
@@ -171,6 +172,13 @@ export const TYPERT = {
         "key": "trash",
         "exportName": "default",
         "members": [
+          {
+            "kind": "method",
+            "name": "[Service.init]",
+            "signature": "[Service.init](): void",
+            "summary": "Cordis class-plugin apply hook.",
+            "jsDoc": "/** Cordis class-plugin apply hook. Return immediately; never await maintenance. */"
+          },
           {
             "kind": "method",
             "name": "trashSession",
@@ -214,7 +222,7 @@ export const TYPERT = {
           },
           {
             "name": "TrashRecord",
-            "declaration": "export interface TrashRecord {\n    purgePending?: boolean;\n    trashedAt: number;\n    workspaceId?: string;\n    titleSnapshot?: string;\n}"
+            "declaration": "export interface TrashRecord {\n    purgePending?: boolean;\n    deferred?: boolean;\n    trashedAt: number;\n    workspaceId?: string;\n    titleSnapshot?: string;\n}"
           }
         ]
       }

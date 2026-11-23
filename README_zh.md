@@ -15,7 +15,8 @@ GitHub 主仓 · [Gitee 镜像](https://gitee.com/huang-lin-java/d-trash)
 - **收进回收站**：从会话右键菜单或悬停按钮收进，保留日志和工作区成员位置。
 - **恢复**：取消归档，保留当前工作区位置。
 - **彻底删除**：确认后物理删除本地会话日志并清理必要记录，不可恢复。
-- **清空回收站**：跨工作区逐条删除，失败条目保留以便重试。
+- **占用时排队**：重启 DSH 后自动重试删除；恢复可取消排队。
+- **清空回收站**：跨工作区逐条删除，汇总区分已删除、已排队与失败数。
 - **审计日志**：以本地 JSONL 记录操作、阶段和失败原因。
 
 全局面板按收进时间倒序显示标题与当前所属工作区，界面支持中英文。
@@ -52,7 +53,7 @@ Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为�
 | 面板 → 清空回收站 | 确认后永久删除全部回收站会话 |
 | 面板 → 刷新 | 重读列表和工作区投影 |
 
-删除使用内联确认，可按取消或 Escape 退出。已进入待清理状态的条目不能恢复或重新收进，应重试删除以完成已记录的清理。
+删除使用内联确认，可按取消或 Escape 退出。排队条目显示「待删除（重启 DSH 后自动完成）」；点恢复只取消排队，仍保留在回收站，日志、归档和工作区归属不变，再次恢复则按普通流程取消归档。已开始物理删除、带 purge 凭据的条目禁用恢复，应重试删除以完成清理。
 
 ## 工作原理
 
@@ -81,7 +82,7 @@ peer 区间允许兼容更新，不代表后续 DSH 版本已验收。升级后�
 
 ## 已知限制
 
-- 已加载/已 enter 的会话因 DSH 占用官方写租约而拒绝删除；官方无公开卸载/close API，插件无法释放该租约。请切换离开到其它会话或重启 DSH 后再试；切换后若已加载会话仍持锁，请重启 DSH。Client 提供中英操作提示并保留底层错误，绝不因锁占用而绕过租约盲删。
+- 已加载/已 enter 的会话可能长期由 DSH 持有写租约。删除/清空遇到 lock-busy 会先排队，保留日志、归档和工作区归属；重启 DSH 后 Host 自动重试，若仍 busy 则保留到下次启动，也可手动再次彻底删除。启动扫描在后台执行，服务未就绪时退避重试，其它错误按阶段报告。官方无公开卸载/close API；插件不释放其它所有者的句柄，不绕过租约、不 unlink 活锁文件、不夺锁。
 - 保留附件、工作区文件、Git worktree、产物、服务端日志、备份及其它插件快照。
 - 不承诺安全擦除；搜索结果依赖 DSH 既有同步收敛，不保证立即消失；投影缓存清理失败只记 warning。
 - 回收站会话仍属于归档集合，原生「显示已归档 / 全部对话」视图仍可显示。
@@ -92,7 +93,7 @@ peer 区间允许兼容更新，不代表后续 DSH 版本已验收。升级后�
 
 路径为 **`<home>/logs/trash.log`**，通常是 **`~/.dsh/logs/trash.log`**。Host 从 persistence stat/source 路径反推并校验 home，不读取 `DSH_HOME` 环境变量；自定义 home 时，下列命令应使用对应路径。
 
-每行 JSONL 固定包含 **`ts`**、**`action`**、**`sessionId`**、**`stage`**、**`result`**、**`reason`**。`ts` 为 ISO 时间；无原因时 `reason: null`，清空汇总使用 `sessionId: null`。action 包括 `trashSession`、`restoreSession`、`removeFromTrash`、`emptyTrash`、`recovery` 和 `log-rotate`。
+每行 JSONL 固定包含 **`ts`**、**`action`**、**`sessionId`**、**`stage`**、**`result`**、**`reason`**。`ts` 为 ISO 时间；无原因时 `reason: null`，清空汇总使用 `sessionId: null`。action 包括 `trashSession`、`restoreSession`、`removeFromTrash`、`emptyTrash`、`recovery`、`startup` 和 `log-rotate`。排队记 `deferred/ok`，清空汇总区分已删除、失败和排队数；稳定 wire 前缀 `[D_TRASH_DEFERRED] ` 在界面展示为「已排队」状态。
 
 ```sh
 tail -F ~/.dsh/logs/trash.log

@@ -29,6 +29,8 @@
     "unknownTime": "Unknown time",
     "noWorkspace": "No workspace",
     "physicalDeletion": "Physical deletion permanently removes local session logs and cannot be undone.",
-    "purgePending": "Deletion is unfinished. Retry physical deletion to complete cleanup."
+    "purgePending": "Deletion is unfinished. Retry physical deletion to complete cleanup.",
+    "deferred": "Pending deletion (automatically completes after restarting DSH)",
+    "deferredNotice": "Queued for deletion. Restart DSH to complete it; Restore cancels the queue. {reason}"
   }
 }

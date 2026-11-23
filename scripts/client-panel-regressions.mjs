@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { PurgeError } from '../dist/purge.js'
-import { SESSION_LOCK_BUSY_PREFIX, TrashErrorCode } from '../dist/types.js'
+import { SESSION_LOCK_BUSY_PREFIX, DEFERRED_PREFIX, TrashErrorCode } from '../dist/types.js'
 import { copy } from '../dist/client-copy.js'
 
 export async function runPanelRegressions({ entries, mount, find, tick, records, archived,
@@ -337,6 +337,46 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
     }
   }
 
+  // Queue acknowledgements are status messages, preserve rows and allow cancellation.
+  for (const [method, label] of [['removeFromTrash', 'Delete forever'], ['emptyTrash', 'Empty trash']]) {
+    const original = hostRemote[method]
+    const restore = hostRemote.restoreSession
+    for (const transport of [false, true]) {
+      records.clear(); seed('queued-session', { titleSnapshot: 'Queued session' })
+      const message = `${DEFERRED_PREFIX}0 deleted, 0 failed, 1 queued`
+      hostRemote[method] = async () => {
+        records.get('queued-session').deferred = true
+        if (transport) throw new Error(message)
+        return { ok: false, error: { message } }
+      }
+      hostRemote.restoreSession = async () => {
+        delete records.get('queued-session').deferred
+        return { ok: true, value: undefined }
+      }
+      view = setup(); view.render(); await tick()
+      button(view.render(), label).props.onClick()
+      button(group(view.render()), label).props.onClick(); await tick()
+      for (const language of ['en', 'zh']) {
+        setLanguage(language)
+        tree = view.render()
+        assert.equal(find(tree, node => node.props.role === 'alert'), undefined)
+        assert.ok(text(tree).includes(copy[language].deferred))
+        assert.ok(text(tree).includes(copy[language].deferredNotice.replace('{reason}', message)))
+        assert.equal(button(tree, copy[language].restore).props.disabled, undefined)
+        assert.equal(find(tree, node => node.props.role === 'group'), undefined)
+      }
+      setLanguage('en')
+      button(view.render(), 'Restore').props.onClick(); await tick()
+      assert.ok(row(view.render(), 'Queued session'))
+      assert.ok(!text(view.render()).includes(copy.en.deferred))
+      assert.equal(archived.has('queued-session'), true)
+      view.unmount()
+    }
+    hostRemote[method] = original
+    hostRemote.restoreSession = restore
+  }
+  console.log('PASS: deferred exact wire status, bilingual row/notice, refresh on result/transport, Restore cancellation preserves trash')
+
   // Only the exact Host wire prefix enables advice, in both result and
   // transport failure paths. Human text and unrelated markers must not match.
   const lockError = new PurgeError('busy-session', 'lock',
@@ -370,6 +410,8 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
       'Physical deletion [lock] (busy-session): Session lock is busy; session may be open or writing',
       '[D_TRASH_SESSION_LOCK_BUSY_OTHER] unrelated failure',
       `Other error mentioning ${SESSION_LOCK_BUSY_PREFIX}in its detail`,
+      '[D_TRASH_DEFERRED_OTHER] unrelated failure',
+      `Other error mentioning ${DEFERRED_PREFIX}in its detail`,
     ]) {
       hostRemote[method] = async () => ({ ok: false, error: { message } })
       view = setup(); view.render(); await tick()

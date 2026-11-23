@@ -7,7 +7,7 @@
 ## Host 协议与状态
 
 `TrashService extends TypertRemoteService` 声明 `typert`、`storageDomain`、`workspaceRegistry`、`sessionPersistence`
-依赖。首次调用时打开并共享 `trash` domain（version 1），打开失败后允许重试；
+依赖。在首次请求（含 apply 后后台扫描）时打开并共享 `trash` domain（version 1），打开失败后允许重试；
 卸载先等待已接纳操作，再关闭 domain。持久化由宿主 storage backend 负责。
 
 **可观测回收站 `trash = marker ∩ archived`。** marker 表与原生归档集合分别持久化；
@@ -18,12 +18,12 @@
 | 方法 | 行为 | Host 返回值 |
 | --- | --- | --- |
 | `trashSession(sessionId)` | 先原生归档（`stopActivity: true`），写 marker 前后均校验归档；发现原生取消归档则删 marker 并抛错 | `Promise<void>` |
-| `restoreSession(sessionId)` | 先删 marker，再取消原生归档；失败且仍归档时才补回原记录 | `Promise<void>` |
-| `removeFromTrash(sessionId)` | 门禁后持锁整体迁移、关锁、删除日志，再清归属/归档/marker/投影缓存 | `Promise<boolean>`（成功 true；门禁或阶段失败抛错） |
-| `emptyTrash()` | 全局边界内逐条物理删除，部分失败保留失败 marker 并汇总阶段 | `Promise<number>`（成功数；部分失败抛 AggregateError） |
-| `listTrash()` | 对账普通 stale marker；保留 purge 凭据，返回不含私有路径的记录副本与可选 purgePending | `Promise<Array<[SessionId, TrashRecord]>>` |
+| `restoreSession(sessionId)` | 排队项只移除 deferredAt、保留归档/普通 marker；普通项先删 marker 再取消归档，失败且仍归档时才补回 | `Promise<void>` |
+| `removeFromTrash(sessionId)` | 门禁后持锁整体迁移、关锁、删除日志，再清归属/归档/marker/投影缓存 | `Promise<boolean>`（成功 true；lock-busy 排队抛 `[D_TRASH_DEFERRED]`，其它错误带阶段） |
+| `emptyTrash()` | 全局边界内逐条物理删除，分别汇总删除/排队/失败数与阶段 | `Promise<number>`（全成功返回删除数；纯排队抛 DeferredError，真失败抛 AggregateError） |
+| `listTrash()` | 对账普通 stale marker；保留 purge 凭据，返回不含私有路径的记录副本与可选 purgePending/deferred | `Promise<Array<[SessionId, TrashRecord]>>` |
 
-marker 包含 `trashedAt`，schema 保留可选 `workspaceId`、`titleSnapshot`。
+marker 包含 `trashedAt`，schema 保留可选 `workspaceId`、`titleSnapshot`；私有 `deferredAt` 表示锁忙后排队，独立于 purge 凭据。
 正常收进不写这两个可选字段；工作区显示由 Client 的当前 Workspace 快照派生。
 原生归档不会反向写 marker。
 
@@ -84,20 +84,31 @@ marker 的可选私有 `purge` 存 source/target/dev/ino/deleting/logsDeleted；
 
 失败用 `Physical deletion [stage] (id): reason` 报告，结构化日志包含 sessionId/stage/result/reason。
 取写租约遇到占用时，Host `PurgeError.code` 为 `D_TRASH_SESSION_LOCK_BUSY`，消息以精确前缀
-`[D_TRASH_SESSION_LOCK_BUSY] ` 开头；`emptyTrash` 只要有此类失败，汇总消息也带相同前缀，保留成功/失败数与逐项原错。
-Client 仅对删除/清空失败消息的此前缀展示 locale 中的中英操作建议，不模糊匹配 busy/lock 等文字；完整底层阶段、session id、原因及清空计数仍显示。
+`[D_TRASH_SESSION_LOCK_BUSY] ` 开头。Host 仅对无 purge、仍归档的 lock-busy 持久排队，返回 `[D_TRASH_DEFERRED] ` 确认；底层阶段、id、busy 原因与 cause 保留。其它阶段的 EBUSY 不排队，排队写入失败报告 deferred 阶段真失败。
+Client 精确识别排队前缀并显示中英「已排队」status，关闭确认框；不模糊匹配 busy/lock 文本。混合 empty 的真失败仍报错，消息分别含 deleted/failed/queued 数，AggregateError.errors 只含真失败；纯排队使用 DeferredError，全成功返回删除数。
 `emptyTrash` 尝试全部条目，失败汇总成功数与阶段。Client 对失败也重读列表和只读 Workspace 投影，
 显示部分成功和可重试的诊断条目。投影缓存失败只记录警告，此时 marker 可能已清除，不保证后续 purge 自动重试缓存。搜索索引依赖下一次稳定搜索观测时的现有同步收敛；已检查的 query API 没有公开 rescan，不调用私有 `_reconcile` 或直接编辑 SQLite。
 附件、工作区文件、worktree、产物、服务端日志、备份及其它插件扫描快照均保留；不承诺安全擦除或搜索立即消失。
 仅覆盖 JSONL 与进程崩溃，不声称断电事务；有 pending 凭据时不要降级旧版插件。
 
-## 已知限制：已加载会话与写租约
+## 排队与启动自动删除（方案 A）
 
-已加载/已 enter 的会话会由 DSH 持有官方写租约，插件无法取得互斥时必须拒绝物理删除。
-用户真机调查中，`lsof` 显示 DSH 以写句柄持有 `session.lock`；这是平台约束，不是允许强删的残留锁。
-官方无供插件使用的公开卸载/close API；插件不释放其它服务所有的生命周期或写句柄。
-请先切换离开到其它会话或重启 DSH 后再试；切换不会保证卸载已加载会话，若仍占用请重启 DSH。
-绝不因锁占用而盲删、unlink 锁文件、夺锁或绕过官方写租约。此故障调查来自用户，本轮只做合成临时 home 回归，未进行真机复验。
+已加载/已 enter 的会话可能长期由 DSH 持有官方写租约；用户既有真机调查显示 `session.lock` 存在写句柄，官方没有供插件释放其它所有者句柄的公开 unload/close API。
+旧的「重启后只能手动再删」方案已废弃。remove/empty 在初次 move 的 lock 阶段 busy 后，只写 marker 的 `deferredAt`（重复 busy 保留首次时间），
+不动会话日志/归档/工作区归属、不写 purge 凭据；Remote 列表仅暴露 `deferred: true`，仍属于普通 marker ∩ archived，原生取消归档后的 stale marker 仍由 list 对账。
+
+Cordis class-plugin `[Service.init]` 在构造/apply 后投递 0ms unref timer 并立即返回。Host 取所有排队项快照，
+逐项进入插件全局边界并重读 marker，调用原 `purgeSession`，完整保留 stat/realpath/dev/ino、官方写租约、intent/最终复核/rename/close/rm 门禁。
+成功后正常清日志/成员/归档/marker、尝试清投影；仍 busy 则保留到下次启动，本 Host 不轮询追锁；可手动再次彻底删除。
+服务/domain 或尚未开始删除的其它阶段失败按实际阶段记录，后台按 1/2/4/…/30 秒退避重试；扫描异常不会拒绝初始化。
+卸载取消 timer，等待已接纳的维护操作后关 domain；依赖撤回时保守保留状态。此机制不保证抢在原生加载前完成，更不会强制删当前忙会话。
+
+真正写 purge intent 时移除 deferredAt；已有 purge 凭据不参与排队扫描，继续只由显式 purge/empty 恢复，不改变原校验语义。
+启动中其它阶段失败一旦留下 purge 凭据，就由既有恢复协议处理；list/restore/re-trash 不能丢凭据。
+面板显示「待删除（重启 DSH 后自动完成）」/“Pending deletion (automatically completes after restarting DSH)”。
+排队项点「恢复」只取消 deferredAt，保留普通 marker、归档、日志和归属；再次恢复走普通取消归档。删除按钮保留手动重试。
+
+绝不绕过写锁、不 unlink 活锁文件、不夺锁、不调用私有卸载接口。本轮只使用合成临时 home，未修改核心/profile 或操作真实会话；既有真机调查不作为本轮 GUI 复验。
 
 ## 持久化操作日志
 
@@ -132,14 +143,15 @@ POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并
 | --- | --- |
 | `trashSession` / `restoreSession` | 每次调用一条 `complete`，成功 `ok`，失败 `failed` 并保留原因 |
 | `removeFromTrash` | purge 阶段 + 一条 `complete` 结果，包括门禁/依赖失败 |
-| `emptyTrash` | 每条会话的 purge 阶段与 `complete`，以及一条 `summary`；原因包含成功/失败数，空列表也有汇总 |
+| `emptyTrash` | 每条会话的 purge 阶段与 `complete`，以及一条 `summary`；原因包含删除/失败/排队数，空列表也有汇总 |
+| `startup` | 每个排队条目的 purge 阶段与 complete（ok/deferred/failed）；扫描依赖失败为 scan/failed |
 | `recovery` | 每条待恢复凭据的阶段与 `recovery` 结果；成功 `deleted` / `unmoved`，失败 `failed` |
 | `log-rotate` | 成功 `complete/ok`；`reason` 含文件序号、保留范围、实际淘汰文件或 none 和阈值；失败按实际步骤（含序号）降级 logger |
 
 purge 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/projection`，幽灵记录使用独立的 `logs-absent`；
 工作区 detach 每次实际尝试各记一条，不为非成员或零归属伪造 detach 行；日志行数不固定。
 `unlocked/ok` 仅在真正取得租约且 `release()` 成功后写入；取锁失败不产生 `locked` 或 `unlocked` 行。
-lock-busy 路径为 `gate/ok → lock/failed → complete/failed`，正常成功的 `renamed → unlocked → logs-deleted` 顺序不变。
+lock-busy 排队路径为 `gate/ok → lock/failed → deferred/ok → complete/deferred`，deferred 的 reason 含 busy 原因；排队写入失败则 `deferred/failed → complete/failed`，正常成功的 `renamed → unlocked → logs-deleted` 顺序不变。
 失败按实际阶段记录，缓存清理失败为 `projection/warning`。
 每条追加尝试都会等待完成；rename 事件在测试 SIGKILL 前已写出。日志不是业务提交凭据，
 也没有断电级 fsync 保证。任意定位、轮转、创建、打开、追加、关闭失败均不改变主操作结果，
@@ -188,7 +200,7 @@ Client 先 `await ctx.remote.$mount(contribution)`，再 `ctx.get('remote.trash'
 列表按收进时间倒序，标题按 `titleSnapshot` → Session catalog title/displayTitle → 短 id 兜底。
 所属工作区按 `useWorkspaces().items[].sessionIds` 查当前 `title`，重命名或归属改变随快照更新；
 无归属显示「无所属工作区 / No workspace」，不拿历史 `workspaceId` 当显示名。
-普通条目每次渲染再与 `archivedSessionIds` 求交集；带 `purgePending` 的待清理记录独立保留、禁用恢复并提示重试。UI 过滤只改投影，不写 Host marker 表。
+排队条目显示 deferred 文案，恢复只取消排队；普通条目每次渲染再与 `archivedSessionIds` 求交集；带 `purgePending` 的待清理记录独立保留、禁用恢复并提示重试。UI 过滤只改投影，不写 Host marker 表。
 
 ## Workspace 同步边界
 
@@ -214,6 +226,8 @@ Client 先 `await ctx.remote.$mount(contribution)`，再 `ctx.get('remote.trash'
 
 `npm run build`（或 `pnpm build`）依次运行 TypeScript、Typert 生成器和 Client 打包。
 生成器在临时目录读取精确版本依赖源码，不修改依赖或链接。
+
+新增 13 项 `deferred-regressions.mjs`（Node 与 discovery 均执行）覆盖真实锁排队/时间与 inode 保留、重启完成/仍忙、恢复取消、非 lock EBUSY、purge 凭据优先、empty 混合汇总、排队落盘失败、真实 Cordis init、stat/domain 就绪重试及卸载。Client 另验证双语行/status、精确前缀、RemoteResult/transport 与取消排队保留行。
 
 `npm test` 覆盖 Host 操作/补偿/串行化、Remote codecs、共享面板、响应倒序、文案及资源清理，
 以及合成临时 home 上的真实 flock/rename/rm、外部锁竞争、SIGKILL 后恢复、失败重试和 restore 回归。
@@ -290,7 +304,7 @@ if ($LASTEXITCODE -ne 0) { throw 'pack failed' }
 ```
 
 预期 build 输出 Typert / Client generated/bundled；npm test 输出平台 10 passed/0 skipped、phase4 27 passed/10 skipped、
-日志 26 passed/3 skipped（每个 SKIP 带 POSIX 原因），幽灵记录 18 passed/0 skipped，其余 Host/Client/生成器通过，退出码 0。
+日志 27 passed/3 skipped（每个 SKIP 带 POSIX 原因），幽灵记录 18 passed/0 skipped、排队 13 passed/0 skipped，其余 Host/Client/生成器通过，退出码 0。
 无安装版变量时 discovery 明确输出 SKIP，不算 discovery 通过。若已安装 DSH，可仅设置以下两个路径再运行；
 runner 负责 ELECTRON_RUN_AS_NODE、等待 GUI 子系统 Electron 退出和转发输出，无需修改 profile：
 
