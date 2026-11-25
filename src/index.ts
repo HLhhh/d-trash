@@ -4,6 +4,10 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
+import Schema from '@deepseek-ai/schemastery'
+import { SessionDistiller, DistillError, type DistillReader, type DistillExecutor } from './distill.js'
+import { sessionReader, agentExecutor, listDistillAgents } from './distill-host.js'
+import type { DistillResult, DistillAgentPreset } from './types.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { SessionPurger, PurgeError, type PurgeIntent } from './purge.js'
@@ -44,10 +48,18 @@ const trashDomain = defineDomain({
   },
 })
 
+export interface Config { distillDir: string }
+export const Config: Schema<Config> = Schema.object({
+  distillDir: Schema.string().default(''),
+})
+export interface DistillDependencies { reader?: DistillReader; executor?: DistillExecutor }
+
 /** Host-only owner of trash markers and their archive/restore operations. */
 export default class TrashService extends TypertRemoteService {
+  static Config = Config
   static inject = ['typert', 'storageDomain', 'workspaceRegistry', 'sessionPersistence']
 
+  private readonly distiller: SessionDistiller
   private readonly purger: SessionPurger
   private readonly operationLog: OperationLog
   private readonly action = new AsyncLocalStorage<TrashAction>()
@@ -60,7 +72,7 @@ export default class TrashService extends TypertRemoteService {
   private startupStarted = false
   private readonly startupSettled = new Set<SessionId>()
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, config: Config = { distillDir: '' }, dependencies: DistillDependencies = {}) {
     super(ctx, 'trash', { namespace: 'trash' })
     this.purger = new SessionPurger(async id => {
       const persistence = this.ctx.get('sessionPersistence')
@@ -68,8 +80,14 @@ export default class TrashService extends TypertRemoteService {
       return persistence.stat(id)
     }, (id, stage) => this.report(id, stage, 'ok'))
     this.operationLog = new OperationLog(id => this.logHome(id), line => this.ctx.logger.info(line))
+    this.distiller = new SessionDistiller(dependencies.reader ?? sessionReader(() => {
+      const persistence = this.ctx.get('sessionPersistence')
+      if (!persistence) throw new Error('TrashService requires sessionPersistence')
+      return persistence
+    }, id => this.purger.home(id)), dependencies.executor ?? agentExecutor(ctx), config.distillDir)
     ctx.effect(() => async () => {
       this.stopped = true
+      this.distiller.dispose()
       clearTimeout(this.startupTimer)
       await this.exclusive(async () => {
         // An unsuccessful open owns no handle; close failures still propagate.
@@ -223,6 +241,34 @@ export default class TrashService extends TypertRemoteService {
       if (deferred) throw new DeferredError(`Move to system trash: ${deleted} deleted, 0 failed, ${deferred} queued`, undefined)
       return deleted
     }, 'summary', () => `${deleted} deleted, ${failed} failed, ${deferred} queued`))
+  }
+
+  @Remote('listDistillAgents')
+  async listDistillAgents(): Promise<DistillAgentPreset[]> {
+    if (this.stopped) throw new Error('Trash Host is unloading')
+    return listDistillAgents(this.ctx)
+  }
+
+  @Remote('distillSession')
+  async distillSession(sessionId: SessionId, agentPresetId: string): Promise<DistillResult> {
+    if (this.stopped) throw new Error('Trash Host is unloading')
+    return this.forSession(sessionId, async () => {
+      await this.operationLog.write('distill', sessionId, 'started', 'ok')
+      try {
+        if (this.stopped) throw new Error('Trash Host is unloading')
+        const record = (await this.domain()).table('trash').get(sessionId)
+        if (!record || record.purge || !this.workspaceRegistry().archivedSessionIds.includes(sessionId)) {
+          throw new Error('Session must be in trash without pending cleanup')
+        }
+        const result = await this.distiller.run(sessionId, agentPresetId)
+        await this.operationLog.write('distill', sessionId, 'completed', 'ok', result.mode)
+        return result
+      } catch (error) {
+        const failure = error instanceof DistillError ? error : new DistillError('gate', sessionId, error)
+        await this.operationLog.write('distill', sessionId, 'failed', 'failed', failure)
+        throw failure
+      }
+    })
   }
 
   private async report(sessionId: SessionId | null, stage: string, result: string, error?: unknown): Promise<void> {

@@ -66,6 +66,50 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
     clientArchived.add(id)
   }
 
+  // Distillation uses its own read-only Remote calls; it never enters the
+  // shared archive/marker mutation projection layer.
+  for (const language of ['en', 'zh']) {
+    setLanguage(language)
+    const t = key => copy[language][key]
+    records.clear(); archived.clear(); clientArchived.clear(); panelCalls.length = 0
+    seed('distill-row')
+    const distillView = setup()
+    distillView.render(); await tick()
+    let distillTree = distillView.render()
+    button(distillTree, t('distill')).props.onClick()
+    // Duplicate clicks while loading share the component's synchronous guard.
+    button(distillTree, t('distill')).props.onClick()
+    assert.ok(find(distillView.render(), x => x.props.role === 'status' && text(x) === t('distillLoading')))
+    await tick(); distillTree = distillView.render()
+    const select = find(distillTree, x => x.type === 'select')
+    assert.equal(select.props.value, 'preset-one')
+    assert.match(text(select), /Preset One \(preset-one\)/)
+    assert.ok(text(select).includes(t('distillManual')))
+    panelFailures.distillSession = true
+    button(distillTree, t('distillStart')).props.onClick()
+    assert.ok(text(distillView.render()).includes(t('distillRunning')))
+    await tick(); assert.match(text(find(distillView.render(), x => x.props.role === 'alert')), /injected failure/)
+    panelFailures.distillSession = false
+    button(distillView.render(), t('distillStart')).props.onClick(); await tick()
+    distillTree = distillView.render()
+    assert.ok(text(distillTree).includes(t('distillCompleted')))
+    button(distillTree, t('distillFile')).props.onClick()
+    const input = find(distillView.render(), x => x.type === 'input' && x.props.value === '/synthetic/distill-row-distill.md')
+    assert.equal(input.props.readOnly, true)
+    let selected = 0
+    input.props.ref({ focus() {}, select() { selected++ } }); assert.equal(selected, 1)
+    button(distillView.render(), t('distill')).props.onClick(); await tick()
+    find(distillView.render(), x => x.type === 'select').props.onChange({ currentTarget: { value: '__manual__' } })
+    button(distillView.render(), t('distillStart')).props.onClick(); await tick()
+    assert.ok(text(distillView.render()).includes(t('distillPromptSaved')))
+    assert.deepEqual(panelCalls.filter(x => x[0] === 'distillSession').at(-1), ['distillSession', 'distill-row', '__manual__'])
+    assert.equal(records.has('distill-row'), true); assert.equal(archived.has('distill-row'), true)
+    assert.ok(!panelCalls.some(x => ['trashSession', 'restoreSession', 'removeFromTrash', 'emptyTrash'].includes(x[0])))
+    distillView.unmount(); assert.equal(distillView.lateUpdates, 0)
+  }
+  setLanguage('en')
+  console.log('PASS: bilingual distill selection, duplicate suppression, progress, retry, manual status, file path selection and read-only Remote flow')
+
   records.clear()
   panelCalls.length = 0
   let view = setup()

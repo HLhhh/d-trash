@@ -3,8 +3,23 @@ import { z } from 'zod'
 
 import { createTypertRemoteInfo } from '@deepseek-ai/dsh-typert-protocol/remote-info'
 
+let d_trash_trash_distillSession_parameter_0$schema$value
+const d_trash_trash_distillSession_parameter_0$schema = () => (d_trash_trash_distillSession_parameter_0$schema$value ??= z.string())
+let d_trash_trash_distillSession_parameter_1$schema$value
+const d_trash_trash_distillSession_parameter_1$schema = () => (d_trash_trash_distillSession_parameter_1$schema$value ??= z.string())
+let d_trash_trash_distillSession_result$schema$value
+const d_trash_trash_distillSession_result$schema = () => (d_trash_trash_distillSession_result$schema$value ??= z.object({
+  'path': z.string(),
+  'summary': z.string(),
+  'mode': z.union([z.literal("agent"), z.literal("prompt")]),
+}))
 let d_trash_trash_emptyTrash_result$schema$value
 const d_trash_trash_emptyTrash_result$schema = () => (d_trash_trash_emptyTrash_result$schema$value ??= z.number())
+let d_trash_trash_listDistillAgents_result$schema$value
+const d_trash_trash_listDistillAgents_result$schema = () => (d_trash_trash_listDistillAgents_result$schema$value ??= z.array(z.object({
+  'id': z.string(),
+  'name': z.string(),
+})))
 let d_trash_trash_listTrash_result$schema$value
 const d_trash_trash_listTrash_result$schema = () => (d_trash_trash_listTrash_result$schema$value ??= z.array(z.tuple([z.string(), z.object({
   'purgePending': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional().describe('Host retains a private purge receipt; show diagnosis and allow deletion retry.'),
@@ -25,6 +40,10 @@ let d_trash_trash_trashSession_parameter_0$schema$value
 const d_trash_trash_trashSession_parameter_0$schema = () => (d_trash_trash_trashSession_parameter_0$schema$value ??= z.string())
 let d_trash_trash_trashSession_result$schema$value
 const d_trash_trash_trashSession_result$schema = () => (d_trash_trash_trashSession_result$schema$value ??= z.void())
+let d_trash_trash_distillSession_parameter_0_strict$schema$value
+const d_trash_trash_distillSession_parameter_0_strict$schema = () => (d_trash_trash_distillSession_parameter_0_strict$schema$value ??= z.string())
+let d_trash_trash_distillSession_parameter_1_strict$schema$value
+const d_trash_trash_distillSession_parameter_1_strict$schema = () => (d_trash_trash_distillSession_parameter_1_strict$schema$value ??= z.string())
 let d_trash_trash_removeFromTrash_parameter_0_strict$schema$value
 const d_trash_trash_removeFromTrash_parameter_0_strict$schema = () => (d_trash_trash_removeFromTrash_parameter_0_strict$schema$value ??= z.string())
 let d_trash_trash_restoreSession_parameter_0_strict$schema$value
@@ -35,6 +54,51 @@ const d_trash_trash_trashSession_parameter_0_strict$schema = () => (d_trash_tras
 const $remote = createTypertRemoteInfo({
   package: 'd-trash',
   methods: {
+    'trash/distillSession': {
+      service: 'trash',
+      invocation: { kind: 'direct' },
+      parameters: [
+        {
+          name: 'sessionId',
+          source: 'json',
+          codec: {
+            mode: 'strict',
+            typeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
+            create: d_trash_trash_distillSession_parameter_0$schema,
+            jsonSchema: {"type":"string"},
+          },
+          strictCodec: {
+            mode: 'strict',
+            typeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
+            create: d_trash_trash_distillSession_parameter_0_strict$schema,
+            jsonSchema: {"type":"string"},
+          },
+        },
+        {
+          name: 'agentPresetId',
+          source: 'json',
+          codec: {
+            mode: 'strict',
+            typeSymbol: 'd-trash#trash/distillSession:agentPresetId',
+            create: d_trash_trash_distillSession_parameter_1$schema,
+            jsonSchema: {"type":"string"},
+          },
+          strictCodec: {
+            mode: 'strict',
+            typeSymbol: 'd-trash#trash/distillSession:agentPresetId',
+            create: d_trash_trash_distillSession_parameter_1_strict$schema,
+            jsonSchema: {"type":"string"},
+          },
+        },
+      ],
+      result: {
+        mode: 'strict',
+        typeSymbol: 'd-trash/types#DistillResult',
+        create: d_trash_trash_distillSession_result$schema,
+        jsonSchema: {"type":"object","properties":{"path":{"type":"string"},"summary":{"type":"string"},"mode":{"type":"string","enum":["agent","prompt"]}},"required":["path","summary","mode"],"additionalProperties":true},
+      },
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":253,"column":9},
+    },
     'trash/emptyTrash': {
       service: 'trash',
       description: 'Each item commits independently; failures retain markers and name their stages.',
@@ -47,7 +111,20 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_emptyTrash_result$schema,
         jsonSchema: {"type":"number"},
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":204,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":222,"column":9},
+    },
+    'trash/listDistillAgents': {
+      service: 'trash',
+      invocation: { kind: 'direct' },
+      parameters: [
+      ],
+      result: {
+        mode: 'strict',
+        typeSymbol: 'd-trash#trash/listDistillAgents:result',
+        create: d_trash_trash_listDistillAgents_result$schema,
+        jsonSchema: {"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":true}},
+      },
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":247,"column":9},
     },
     'trash/listTrash': {
       service: 'trash',
@@ -61,7 +138,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_listTrash_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported selected tuple type',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":382,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":428,"column":9},
     },
     'trash/removeFromTrash': {
       service: 'trash',
@@ -91,7 +168,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_removeFromTrash_result$schema,
         jsonSchema: {"type":"boolean"},
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":195,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":213,"column":9},
     },
     'trash/restoreSession': {
       service: 'trash',
@@ -121,7 +198,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_restoreSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":168,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":186,"column":9},
     },
     'trash/trashSession': {
       service: 'trash',
@@ -151,7 +228,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_trashSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":136,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":154,"column":9},
     },
   },
 }, z)
@@ -209,6 +286,16 @@ export const TYPERT = {
           },
           {
             "kind": "method",
+            "name": "listDistillAgents",
+            "signature": "@Remote('listDistillAgents') async listDistillAgents(): Promise<DistillAgentPreset[]>"
+          },
+          {
+            "kind": "method",
+            "name": "distillSession",
+            "signature": "@Remote('distillSession') async distillSession(sessionId: SessionId, agentPresetId: string): Promise<DistillResult>"
+          },
+          {
+            "kind": "method",
             "name": "listTrash",
             "signature": "@Remote('listTrash') async listTrash(): Promise<Array<[SessionId, TrashRecord]>>",
             "summary": "Reconcile normal markers; retain purge receipts as retryable diagnostics.",
@@ -216,6 +303,14 @@ export const TYPERT = {
           }
         ],
         "types": [
+          {
+            "name": "DistillAgentPreset",
+            "declaration": "export interface DistillAgentPreset {\n    id: string;\n    name: string;\n}"
+          },
+          {
+            "name": "DistillResult",
+            "declaration": "export interface DistillResult {\n    path: string;\n    summary: string;\n    mode: 'agent' | 'prompt';\n}"
+          },
           {
             "name": "SessionId",
             "declaration": "export type SessionId = Branded<'SessionId'>;"

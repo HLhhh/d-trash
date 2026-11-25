@@ -26,7 +26,7 @@ try {
   mkdirSync(join(packageDir, 'src'), { recursive: true })
   cpSync(join(root, 'src', 'index.ts'), join(packageDir, 'src', 'index.ts'))
   cpSync(join(root, 'src', 'types.ts'), join(packageDir, 'src', 'types.ts'))
-  for (const file of ['purge.ts', 'write-lease.ts', 'fs-retry.ts', 'system-trash.ts']) cpSync(join(root, 'src', file), join(packageDir, 'src', file))
+  for (const file of ['purge.ts', 'write-lease.ts', 'fs-retry.ts', 'system-trash.ts', 'distill.ts', 'distill-host.ts']) cpSync(join(root, 'src', file), join(packageDir, 'src', file))
   cpSync(join(root, 'src', 'operation-log.ts'), join(packageDir, 'src', 'operation-log.ts'))
   symlinkSync(join(root, 'node_modules'), join(packageDir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir')
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -53,6 +53,7 @@ try {
     lib: ['ES2022', 'ESNext.Disposable', 'DOM'],
     paths: {
       '@deepseek-ai/dsh-typert-protocol': [join(protocolDir, 'src', 'index.ts')],
+      '@deepseek-ai/dsh-session': [join(sessionDir, 'src', 'index.ts')],
       '@deepseek-ai/dsh-session/types': [join(sessionDir, 'src', 'types.ts')],
     },
   }

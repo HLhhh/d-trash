@@ -38,6 +38,19 @@
     "copyFailed": "Could not copy ID: {reason}",
     "clipboardUnavailable": "Clipboard access is unavailable in this context.",
     "copyErrorUnknown": "Clipboard write failed without an error message.",
-    "copyManually": "Full ID selected below. Press Cmd/Ctrl+C to copy."
+    "copyManually": "Full ID selected below. Press Cmd/Ctrl+C to copy.",
+    "distill": "Distill",
+    "distillLoading": "Loading agent presets…",
+    "distillRunning": "Reading and distilling…",
+    "distillChoose": "Choose an agent",
+    "distillNotice": "Sends the read-only transcript to the DSH default model using the selected preset in a separate task session. All tool execution is denied. The source stays in trash. Manual export runs no model.",
+    "distillManual": "Export a prompt (manual)",
+    "distillNoAgents": "No agent presets available. Refresh to retry.",
+    "distillStart": "Start",
+    "distillFailed": "Distillation failed; choose an agent again to retry: {reason}",
+    "distillCompleted": "Distillation saved.",
+    "distillPromptSaved": "Prompt saved. Send it to your agent to complete distillation; no model was run.",
+    "distillFile": "Show file path",
+    "distillFileHint": "Copy this path and open it in your editor or file manager."
   }
 }

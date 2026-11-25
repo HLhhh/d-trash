@@ -1,6 +1,9 @@
 import { Service, type Context } from '@deepseek-ai/cordis';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
+import Schema from '@deepseek-ai/schemastery';
+import { type DistillReader, type DistillExecutor } from './distill.js';
+import type { DistillResult, DistillAgentPreset } from './types.js';
 import { type TrashRecord } from './types.js';
 export type { TrashRecord } from './types.js';
 declare module '@deepseek-ai/cordis' {
@@ -8,9 +11,19 @@ declare module '@deepseek-ai/cordis' {
         trash: TrashService;
     }
 }
+export interface Config {
+    distillDir: string;
+}
+export declare const Config: Schema<Config>;
+export interface DistillDependencies {
+    reader?: DistillReader;
+    executor?: DistillExecutor;
+}
 /** Host-only owner of trash markers and their archive/restore operations. */
 export default class TrashService extends TypertRemoteService {
+    static Config: Schema<Config>;
     static inject: string[];
+    private readonly distiller;
     private readonly purger;
     private readonly operationLog;
     private readonly action;
@@ -22,7 +35,7 @@ export default class TrashService extends TypertRemoteService {
     private startupTimer?;
     private startupStarted;
     private readonly startupSettled;
-    constructor(ctx: Context);
+    constructor(ctx: Context, config?: Config, dependencies?: DistillDependencies);
     /** Cordis class-plugin apply hook. Return immediately; never await maintenance. */
     [Service.init](): void;
     private scheduleStartup;
@@ -39,6 +52,8 @@ export default class TrashService extends TypertRemoteService {
     removeFromTrash(sessionId: SessionId): Promise<boolean>;
     /** Each item commits independently; failures retain markers and name their stages. */
     emptyTrash(): Promise<number>;
+    listDistillAgents(): Promise<DistillAgentPreset[]>;
+    distillSession(sessionId: SessionId, agentPresetId: string): Promise<DistillResult>;
     private report;
     private operation;
     /** Use already-open receipts after rename, otherwise obtain an actual stat.

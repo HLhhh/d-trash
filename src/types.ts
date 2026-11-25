@@ -24,3 +24,11 @@ export interface TrashRecord {
   workspaceId?: string
   titleSnapshot?: string
 }
+
+/** Host-owned distillation wire data; never contains source transcript. */
+export interface DistillAgentPreset { id: string; name: string }
+export interface DistillResult {
+  path: string
+  summary: string
+  mode: 'agent' | 'prompt'
+}

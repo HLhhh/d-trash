@@ -1,6 +1,6 @@
-# d-trash — 会话回收站与系统回收站（第 5.2 期）
+# d-trash — 会话回收站、系统回收站与提炼（第 5.3 期）
 
-第 1–4 期及 5.2 已交付。收进保留日志并归档；普通恢复不变；单条移出与清空均将日志目录移入系统回收站，可在系统层面恢复。第 4 期「staging→rm、不可恢复」终态**已废弃**。
+第 1–4 期及 5.2 / 5.3 已交付（5.3 为隔离验收）。收进保留日志并归档；普通恢复不变；单条移出与清空均将日志目录移入系统回收站，可在系统层面恢复。第 4 期「staging→rm、不可恢复」终态**已废弃**。
 方案以随包提供的 `PLAN.md` 为准。既有真机入口和第 4 期两个会话的清理验收已通过（用户既有记录）；
 本次开源整理仅运行隔离回归，未安装、重载或修改真实 profile，未操作真实会话。
 
@@ -8,7 +8,7 @@
 
 `TrashService extends TypertRemoteService` 声明 `typert`、`storageDomain`、`workspaceRegistry`、`sessionPersistence`
 依赖。在首次请求（含 apply 后后台扫描）时打开并共享 `trash` domain（version 1），打开失败后允许重试；
-卸载先等待已接纳操作，再关闭 domain。持久化由宿主 storage backend 负责。
+卸载先取消提炼及 timer，等待已接纳操作收敛，再关闭 domain。持久化由宿主 storage backend 负责。
 
 **可观测回收站 `trash = marker ∩ archived`。** marker 表与原生归档集合分别持久化；
 原生取消归档不经过插件锁，之后的 marker 允许短暂滞留，由 `listTrash` 对账清理。
@@ -21,6 +21,8 @@
 | `restoreSession(sessionId)` | 排队项只移除 deferredAt、保留归档/普通 marker；普通项先删 marker 再取消归档，失败且仍归档时才补回 | `Promise<void>` |
 | `removeFromTrash(sessionId)` | 门禁后持锁整体移入系统回收站、确认源不在、关锁，再清归属/归档/marker/投影缓存 | `Promise<boolean>`（成功 true；lock-busy 排队抛 `[D_TRASH_DEFERRED]`，其它错误带阶段） |
 | `emptyTrash()` | 全局边界内逐条移入系统回收站，分别汇总删除/排队/失败数与阶段 | `Promise<number>`（全成功返回删除数；纯排队抛 DeferredError，真失败抛 AggregateError） |
+| `listDistillAgents()` | 读取宿主非 broken preset 的 id/name，并提供明确手动导出项 | `Promise<DistillAgentPreset[]>` |
+| `distillSession(sessionId, agentPresetId)` | 只读源会话；独立任务执行/手动提示词导出，按 id 串行 | `Promise<DistillResult>`（path/summary/mode） |
 | `listTrash()` | 对账普通 stale marker；保留 purge 凭据，返回不含私有路径的记录副本与可选 purgePending/deferred | `Promise<Array<[SessionId, TrashRecord]>>` |
 
 marker 包含 `trashedAt`，schema 保留可选 `workspaceId`、`titleSnapshot`；私有 `deferredAt` 表示锁忙后排队，独立于 purge 凭据。
@@ -172,6 +174,7 @@ POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并
 | `emptyTrash` | 每条会话的 purge 阶段与 `complete`，以及一条 `summary`；原因包含删除/失败/排队数，空列表也有汇总 |
 | `startup` | 每个排队条目的 purge 阶段与 complete（ok/deferred/failed）；扫描依赖失败为 scan/failed |
 | `recovery` | 每条待恢复凭据的阶段与 `recovery` 结果；兼容结果名 `deleted` 现表示日志已移走或旧凭据确认已不在、`unmoved` 表示未移动，失败 `failed` |
+| `distill` | `started/ok` → `completed/ok` 或 `failed/failed`；失败原因含 gate/read/path/agent/write，手动提示词完成的 reason 为 prompt；不记录正文或模型凭据 |
 | `log-rotate` | 成功 `complete/ok`；`reason` 含文件序号、保留范围、实际淘汰文件或 none 和阈值；失败按实际步骤（含序号）降级 logger |
 
 purge 成功阶段覆盖 `gate/locked/recheck/intent/moved-to-trash/unlocked/detach/unarchive/marker/removed/projection`，幽灵记录使用独立的 `logs-absent`；
@@ -215,7 +218,7 @@ Client 先 `await ctx.remote.$mount(contribution)`，再 `ctx.get('remote.trash'
 不要在挂载前 inject 自己的 `remote.trash`（会等不到 apply），也不要通过未声明的
 `ctx.remote.trash` 属性访问（Cordis 会拒绝）。生成方法直接调用采用位置参数，如
 `trash.trashSession(sessionId)`；Gateway 再编码为 wire `args: { sessionId }`。
-五个方法返回 `RemoteResult<T>`，UI 显式检查 `ok`。
+七个方法返回 `RemoteResult<T>`，UI 显式检查 `ok`。
 
 菜单、hover 与所有面板共用 `trashStore` 和同一写入层：发起时登记递增序号，
 响应在 Client 包装为携带原票据的结果。每 session 的最新序号与 empty 的全局边界共同判旧；
@@ -367,3 +370,51 @@ Windows：
 5. 批量清空确认分项结果；在隔离程序内模拟 Shell 返回非零/aborted，源在则重新过门禁，源不在则仅清记录。不要用真实业务目录进行断电/强杀测试。旧 staging/崩溃协议继续由合成临时 home 回归验证。
 
 回传 OS/CPU、Node/Electron/DSH 版本、退出码、系统回收站可见性/还原结果、是否出现授权/UI、审计阶段与原因即可；不回传会话正文。不要把仅 SKIP 的 discovery 或历史 GUI 验收写成 5.2 真机通过。
+
+
+## 提炼（5.3）
+
+每行点「提炼」，从 Host 重新读取可用 agent preset，选择后开始。运行中显示行内状态，失败可再次选择重试；成功显示摘要与「显示文件路径」，完整路径在只读输入框中选中，复制到编辑器/文件管理器打开。未找到可靠的通用打开文件 API，因此不伪造文件打开 Remote，也不声称点击后已打开。已有 purge 凭据的待清理条目禁用提炼。提炼调用绕过 Client marker/归档写投影层，不额外刷新/修改它们。
+
+### 调研依据与执行机制
+
+安装版 **DSH 0.2.2-rc.5 / Electron 44.7.0 / Node 24.21.0**，从已验证 ASAR 安装锚点读取官方 `src/`：
+
+- `dsh-agent/index.ts` 的 `AgentRegistry.create` 和 `CreateAgentOptions` / `AgentHandle`；`dsh-agent-loop/index.ts` 的 createAgent 初始化一个新 Session 并持有自己的存储写句柄。`dsh-agent/runtime-types.ts` 的 send/whenIdle/cancel/dispose 公共契约。`whenIdle` 只表示静止，因此另核对本任务 `turn/end.reason.kind === completed`，error/aborted/max-tokens/missing 不能当成功。
+- `dsh-api-session-controller/agent.ts` 的 resolveAgent/resumeObserved 可能走 `agents.resume`；`commands.ts` 的 create 可能复用 blank 会话/附加工作区，故都不用于源会话。`dsh-subagent/child-agent.ts` 与 manager.ts 的同进程新 child 使用 `agents.create` + `agentPresets.mount`，需 parent/lineage/manager 生命周期，本插件不把源会话恢复为 parent。
+- `dsh-agent-preset-registry/index.ts` 公开 list/mount；非 broken 行的 id/name，name 缺失回落 id。内置 preset 的本地化名称属于宿主字典，当前选择器保留宿主发布名/id，不复制其字典。列表另含插件明确标识的 `__manual__` 提示词导出项，不冒充宿主 agent。
+- `dsh-api-session-controller/agent.ts` 的 agentOptions 从公开 `agentDefaultModel.currentSelection()` 读取模型；`dsh-agent-loop/agent.ts` 在缺 provider/model 时拒绝运行。preset 是组合，不保证提供模型。提炼在任务开始时取 DSH 默认 provider/model/effort 快照，所选 preset 提供 Agent 组合；不发起真实模型测试，不硬编码路由。
+- `dsh-session-persistence/handle.ts` 的 read access 不占写所有权；`dsh-session-persistence-jsonl/index.ts` 的 open 在 read 分支返回，进入 claimWrite/acquireLease 前已结束；只读打开不发布历史迁移。`dsh-session/index.ts` 的静态 create 构建 detached Session，deriveMessages 还原当前可见消息表面（包括 compaction/replacement），不伪造完整未压缩历史。
+
+`distill-evidence.cjs` 通过安装版实际 JSONL 创建合成日志，持有原写句柄时调用生产 reader，验证转录与源日志字节不变；运行真实 ToolService scoped restrict/guard，拒绝当前任务并保持 Host 其它 scope 不变；真实 Registry、roster/default-model service 通过注入 factory / preset mount 跑生产执行适配器。factory 和 mount 是明确的测试 seam，**不是实际模型调用或真实 preset Loader 端到端验证**。本机无 Inspect 工具，未读取真实 profile roster，未运行模型；源码证据/探针界限见本地报告。
+
+### 只读与结果协议
+
+`@Remote distillSession(sessionId,agentPresetId)` 在 Host 同 sessionId 队列内核对 marker ∩ archived，无 purge 凭据；不调用 listTrash 对账。生产 reader 打开 read handle，在 finally close；把 `Session.create(id,events,header,inheritedEventCount).deriveMessages()` 的 role/content 序列化为 JSON，不附带 provider replay state，不额外读附件或工作区文件。标题取日志最新 session/title 的 title，缺失用完整 id。源 cwd/创建时间取 immutable header，输出 home 保护沿用已验证 stat 路径；不能校验 JSONL home 时 read 阶段拒绝，不猜路径。当前转录上限 2 百万字符（实际模型上下文可能更小），超限不截断，错误可诊断。
+
+执行器用随机新 sessionId 创建任务，在 scoped setup 内挂载选择的 preset。restrict 空 allow 隐藏全局工具，最终 guard 拒绝所有工具执行（包括 preset 的 scoped 工具）；这是可信宿主插件环境中的限制，不是对恶意插件源码的沙箱。发送一条独立 prompt，不将源会话作为 fork seed，不赋予 parent 或工作区成员归属。等待 idle + completed 后读取最后非空 assistant 文本，严格解析 JSON `{type,body}`；type 为 experience / operations / skill-draft / requirements，body 非空 Markdown，提示词要求摘要、决策/证据、可复用步骤、边界和未决问题。不能保证模型内容正确，需要用户检查。
+
+输出为 Markdown，包括 Session ID、Title、Session time、Generated at、Agent preset、Mode、Distillation type 与正文。默认 `<源 cwd>/d-trash-distill/<YYYY-MM-DD>-<清洗后短id>-distill.md`（UTC 日期）；同名时追加 UUID，`wx` 排他创建，避免重试或另一 Host 覆盖已有文件。目录 0700/文件 0600（Windows 不承诺 ACL 等价），写失败清理本次新建的残缺产物，不删除任何源日志。崩溃不保证原子落盘，可能留下部分产物，重试另写新文件。
+
+| Config | 类型 / 默认值 | 行为 |
+| --- | --- | --- |
+| `distillDir` | string / `""` | 空串使用源会话 cwd 下 d-trash-distill；非空须绝对目录；缺源 cwd 则必须配置。拒绝非 canonical/symlink 路径与 DSH persistence home 内的目录；不改 profile 默认值 |
+
+这是 schemastery 导出的 Host Config（class static Config 同源）；依赖已存在的 schemastery 3.19.0 被声明为直接运行依赖，不加新的 Agent 包运行依赖。Agent 可选能力通过已实证的窄公开类型桥和 `ctx.get` 查询，缺服务时不阻断普通回收站。
+
+若 Agent / preset / default-model 服务不可用，选择器仍可「导出提示词（手动）」；Agent 执行失败也可由用户重新选择该项。文件 mode=prompt/type=prompt，明确尚未运行模型，含源转录与可自行发送的提示词；UI 不显示「提炼完成」。未采用直接 ctx.llm 补全：它不等于所选 agent，且容易悄悄丢弃 preset 语义。重试不自动切换模型或降级。
+
+### 并发、卸载与审计
+
+同 sessionId 复用 Host forSession 串行，不同 session 可并发；purge/empty/list 的既有全局边界等待提炼，提炼也等待先前全局边界，源不会在插件提炼中被插件移走。原生归档交错仍不受插件锁控制，插件不补写状态。独立任务会话由宿主正常存储，持有它自己的租约，结束 dispose owned handle；任务日志可能在宿主会话目录可见，由宿主保留，不自动删除，不承诺无新会话目录。**源会话绝不 resume、enter 或获取写租约。**
+
+任务执行五分钟超时，卸载主动 abort 并拒绝后续任务；取消/超时即停止等待不合作的执行器，已创建 Agent cancel+dispose，迟到创建也 dispose，生产 read 在 finally 关闭。标准 provider 负责自身最终收敛；不承诺能强制结束不合作的第三方插件。纯文件 I/O 和审计沿用有界正常收敛，未实现磁盘故障的硬终止。不是持久任务队列，退出后需手动重试，期间产出的宿主任务日志保留。
+
+错误消息 `Distill [gate|read|path|agent|write] (sessionId): reason`；读取失败重读，agent 失败可换 preset，路径失败可配置重试。JSONL 审计新增 action=distill：started/ok 后 completed/ok 或 failed/failed，失败原因携带阶段；手动导出 completed 的 reason=prompt，正常为 agent。审计仅追加 `<home>/logs/trash.log`，不记录正文/提示词，不改变业务结果；该操作日志的变化不属于源会话日志哈希不变约束。
+
+<a id="p53-manual-acceptance"></a>
+### 5.3 真机验收（尚未执行）
+
+仅在维护者另行授权的专用测试 profile 中启用 bundle，创建无价值测试会话并收进回收站。记录 marker/归档/工作区归属、源日志哈希及源锁持有情况。分别在中英文界面选择实际 preset，确认使用 DSH 默认模型、任务有独立 id、不会 resume 源；完成后打开显示路径核对文件字段/类型/正文，检查源状态与哈希不变、无源锁新增占用。实际任务会话日志由宿主保留。
+
+再验证坏路由/读取失败的阶段提示、换 preset 重试、同会话重复请求/两会话并发、长任务卸载取消；选择手动导出应只生成提示词且不调用模型。检查 distill 审计阶段、无正文。缺 cwd 时配置绝对 distillDir，检查重名保留、非法输出路径拒绝与待清理条目禁用。完成后回报平台/DSH 版本和结果，不回传会话正文。本轮没有安装/改 profile、没有运行模型、没有 GUI 或 Windows 真机复验；5.2 的待验收状态不变。

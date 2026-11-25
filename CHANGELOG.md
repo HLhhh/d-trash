@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Trash rows now show a compact monospace session ID with the full ID on hover and one-click copying. Clipboard failures show a readable reason and select the full ID in a read-only field for manual copying. English/Chinese feedback, full IDs (including `im-link:` IDs), fallback, timed confirmation and unmount cleanup are covered by Client regressions; Host APIs and deletion behavior are unchanged.
 
+- Trash rows now offer per-run agent selection to distill a read-only conversation into Markdown, with inline progress, retry and a selectable file path. The output directory is configurable (default: source cwd/d-trash-distill); unavailable execution services offer an explicitly labelled manual prompt export. Isolated rc.5 probes and bilingual regressions cover source-state preservation, source-lock coexistence, concurrency and cancellation; real model/preset and GUI acceptance remain pending.
+
 ### Changed
 
 - Sessions can now be moved to macOS Trash or Windows Recycle Bin, including Empty Trash, for system-level recovery. Same-volume native moves retain safety gates, retryable source-only intents and legacy staging recovery; unsupported platforms and cross-volume moves are refused without a copy/delete fallback. macOS uses no Finder automation and does not guarantee Put Back metadata. English/Chinese UI and docs are aligned; isolated regression coverage includes failures, crashes, busy queues, legacy receipts and batch summaries. Real system Trash/Recycle Bin GUI acceptance remains pending.

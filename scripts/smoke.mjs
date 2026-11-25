@@ -13,7 +13,7 @@ const { default: remoteInfo } = await import(`${manifest.name}/remote`)
 assert.equal(manifest.name, 'd-trash')
 assert.equal(TYPERT.package, manifest.name)
 assert.equal(remoteInfo.package, manifest.name)
-const methods = ['emptyTrash', 'listTrash', 'removeFromTrash', 'restoreSession', 'trashSession']
+const methods = ['distillSession', 'emptyTrash', 'listDistillAgents', 'listTrash', 'removeFromTrash', 'restoreSession', 'trashSession']
 assert.deepEqual(Object.keys(remoteInfo.methods).sort(), methods.map(method => `trash/${method}`))
 
 const records = new Map()
@@ -57,9 +57,9 @@ assert.equal(ctx.trash.name, 'trash')
 assert.equal(trash.typertRemote.namespace, 'trash')
 assert.equal(opened, 0)
 assert.deepEqual(remoteMethods(trash).map(x => x.method).sort(),
-  ['emptyTrash', 'listTrash', 'removeFromTrash', 'restoreSession', 'trashSession'])
-assert.equal(TYPERT.invocations.length, 5)
-assert.equal(remoteInfo.descriptors.length, 5)
+  ['distillSession', 'emptyTrash', 'listDistillAgents', 'listTrash', 'removeFromTrash', 'restoreSession', 'trashSession'])
+assert.equal(TYPERT.invocations.length, 7)
+assert.equal(remoteInfo.descriptors.length, 7)
 await Promise.all([trash.listTrash(), trash.listTrash()])
 assert.equal(opened, 1)
 
@@ -155,7 +155,7 @@ class TestRemote extends Service {
   get workspace() { return this.ctx['remote.workspace'] }
   async $mount(contribution) {
     assert.equal(contribution.package, manifest.name)
-    assert.equal(contribution.descriptors.length, 5)
+    assert.equal(contribution.descriptors.length, 7)
     const wire = contribution.methods['trash/trashSession'].input().create().parse({ sessionId: 'probe' })
     assert.equal(wire.sessionId, 'probe')
     await mountBarrier
@@ -165,6 +165,14 @@ class TestRemote extends Service {
         calls++
         if (rejectMove) return { ok: false, error: { message: 'denied' } }
         return clientRemote.trash.trashSession(id)
+      }, async listDistillAgents() {
+        panelCalls.push(['listDistillAgents'])
+        if (panelFailures.listDistillAgents) return { ok: false, error: { message: 'preset loading failed' } }
+        return { ok: true, value: [{ id: 'preset-one', name: 'Preset One' }, { id: '__manual__', name: '' }] }
+      }, async distillSession(id, preset) {
+        panelCalls.push(['distillSession', id, preset])
+        if (panelFailures.distillSession) return { ok: false, error: { message: 'Distill [agent]: injected failure' } }
+        return { ok: true, value: { path: `/synthetic/${id}-distill.md`, summary: 'Saved summary', mode: preset === '__manual__' ? 'prompt' : 'agent' } }
       }, ...Object.fromEntries(['listTrash', 'restoreSession', 'removeFromTrash', 'emptyTrash'].map(method => [method, async (...args) => {
         panelCalls.push([method, ...args])
         if (panelFailures[method] === 'throw') throw new Error(`transport ${method}`)
@@ -305,7 +313,7 @@ assert.equal(dictionaries, null)
 await uiContext.fiber.dispose()
 await ctx.fiber.dispose()
 assert.equal(closed, 1)
-console.log('PASS: Host registration/lifecycle, 5 Remote codecs, named wire dispatch, real Cordis Client inject checks and menu/hover calls, bilingual copy, failures, duplicate clicks, tooltip cleanup')
+console.log('PASS: Host registration/lifecycle, 7 Remote codecs, named wire dispatch, real Cordis Client inject checks and menu/hover calls, bilingual copy, failures, duplicate clicks, tooltip cleanup')
 
 await import('./host-regressions.mjs')
 await import('./generator-regressions.mjs')
@@ -317,3 +325,5 @@ await import('./ghost-regressions.mjs')
 await import('./operation-log-regressions.mjs')
 await import('./deferred-regressions.mjs')
 await import('./reappear-regressions.mjs')
+
+await import('./distill-regressions.mjs')

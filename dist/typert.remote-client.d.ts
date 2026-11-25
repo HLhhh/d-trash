@@ -5,18 +5,22 @@ import type {
   TypertRemoteMethod,
 } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { TrashRecord } from 'd-trash/types'
+import type { DistillAgentPreset, DistillResult, TrashRecord } from 'd-trash/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$7472617368 {
+    distillSession: (sessionId: SessionId, agentPresetId: string) => Promise<RemoteResult<DistillResult>>
     emptyTrash: () => Promise<RemoteResult<number>>
+    listDistillAgents: () => Promise<RemoteResult<DistillAgentPreset[]>>
     listTrash: () => Promise<RemoteResult<Array<[SessionId, TrashRecord]>>>
     removeFromTrash: (sessionId: SessionId) => Promise<RemoteResult<boolean>>
     restoreSession: (sessionId: SessionId) => Promise<RemoteResult<void>>
     trashSession: (sessionId: SessionId) => Promise<RemoteResult<void>>
   }
   interface TypertRemoteMap {
+    'trash/distillSession': (sessionId: SessionId, agentPresetId: string) => Promise<RemoteResult<DistillResult>>
     'trash/emptyTrash': () => Promise<RemoteResult<number>>
+    'trash/listDistillAgents': () => Promise<RemoteResult<DistillAgentPreset[]>>
     'trash/listTrash': () => Promise<RemoteResult<Array<[SessionId, TrashRecord]>>>
     'trash/removeFromTrash': (sessionId: SessionId) => Promise<RemoteResult<boolean>>
     'trash/restoreSession': (sessionId: SessionId) => Promise<RemoteResult<void>>
@@ -28,7 +32,9 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 }
 
 export declare const TYPERT_REMOTE: TypertRemoteInfo<{
+  readonly 'trash/distillSession': TypertRemoteMethod<{ readonly 'sessionId': SessionId; readonly 'agentPresetId': string }, DistillResult>
   readonly 'trash/emptyTrash': TypertRemoteMethod<{  }, number>
+  readonly 'trash/listDistillAgents': TypertRemoteMethod<{  }, DistillAgentPreset[]>
   readonly 'trash/listTrash': TypertRemoteMethod<{  }, Array<[SessionId, TrashRecord]>>
   readonly 'trash/removeFromTrash': TypertRemoteMethod<{ readonly 'sessionId': SessionId }, boolean>
   readonly 'trash/restoreSession': TypertRemoteMethod<{ readonly 'sessionId': SessionId }, void>

@@ -1,5 +1,5 @@
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
-import { SESSION_LOCK_BUSY_PREFIX, DEFERRED_PREFIX, type TrashRecord } from './types.js'
+import { SESSION_LOCK_BUSY_PREFIX, DEFERRED_PREFIX, type TrashRecord, type DistillAgentPreset, type DistillResult } from './types.js'
 import { copy, type CopyKey } from './client-copy.js'
 import { trashStore, type TrashEntries } from './client-store.js'
 import { WorkspaceSync, type WorkspaceProjection, type WorkspaceReader } from './workspace-sync.js'
@@ -41,6 +41,8 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
     restoreSession(sessionId: SessionId): Promise<RemoteResult<void>>
     removeFromTrash(sessionId: SessionId): Promise<RemoteResult<boolean>>
     emptyTrash(): Promise<RemoteResult<number>>
+    listDistillAgents(): Promise<RemoteResult<DistillAgentPreset[]>>
+    distillSession(sessionId: SessionId, agentPresetId: string): Promise<RemoteResult<DistillResult>>
   }
   interface PanelInjected {
     trash: TrashRemote
@@ -144,6 +146,11 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
   .trash-panel-meta, .trash-panel-note { color:var(--dsw-alias-label-tertiary); font-size:13px; overflow-wrap:anywhere; }
   .trash-panel-confirm { margin:12px 0; padding:12px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; }
   .trash-panel-state { padding:40px 0; text-align:center; color:var(--dsw-alias-label-tertiary); }
+  .trash-distill { margin-top:8px; }
+  .trash-distill select, .trash-distill input { box-sizing:border-box; max-width:100%; padding:6px;
+    border:1px solid var(--dsw-alias-border-l2); border-radius:4px;
+    background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; }
+  .trash-distill input { display:block; width:100%; }
   .trash-panel .trash-error { max-width:none; padding:8px 0; }
   @media (max-width:600px) { .trash-panel { padding-inline:16px; } }
   `
@@ -174,7 +181,7 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
 
       type Confirmation = { kind: 'empty' } | { kind: 'delete'; sessionId: SessionId } | null
       type FailureKey = 'loadFailed' | 'restoreFailed' | 'deleteFailed' | 'emptyFailed'
-      interface TrashRowProps extends Pick<PanelProps, 't' | 'useSessions' | 'useWorkspaces' | 'getLocale'> {
+      interface TrashRowProps extends Pick<PanelProps, 't' | 'useSessions' | 'useWorkspaces' | 'getLocale' | 'trash'> {
         sessionId: SessionId
         record: TrashRecord
         pending: boolean
@@ -252,6 +259,65 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
               onFocus: (event: { currentTarget: HTMLInputElement }) => event.currentTarget.select() })))
       }
 
+      function DistillAction({ sessionId, trash, t, disabled }: {
+        sessionId: SessionId; trash: TrashRemote; t: Translate; disabled: boolean
+      }): Element {
+        const [choices, setChoices] = React.useState<DistillAgentPreset[] | null>(null)
+        const [selected, setSelected] = React.useState('')
+        const [phase, setPhase] = React.useState<'idle' | 'loading' | 'running'>('idle')
+        const [failure, setFailure] = React.useState<string | null>(null)
+        const [result, setResult] = React.useState<DistillResult | null>(null)
+        const [showPath, setShowPath] = React.useState(false)
+        const mounted = React.useRef(false)
+        const busy = React.useRef(false)
+        React.useEffect(() => {
+          mounted.current = true
+          return () => { mounted.current = false }
+        }, [])
+        const choose = async (): Promise<void> => {
+          if (busy.current) return
+          busy.current = true; setPhase('loading'); setFailure(null)
+          try {
+            const rows = unwrap(await trash.listDistillAgents())
+            if (mounted.current) { setChoices(rows); setSelected(rows[0]?.id ?? '') }
+          } catch (error) { if (mounted.current) setFailure(errorMessage(error)) }
+          finally { busy.current = false; if (mounted.current) setPhase('idle') }
+        }
+        const run = async (): Promise<void> => {
+          if (busy.current || !selected) return
+          busy.current = true; setPhase('running'); setFailure(null); setResult(null); setShowPath(false)
+          try {
+            const value = unwrap(await trash.distillSession(sessionId, selected))
+            if (mounted.current) { setResult(value); setChoices(null) }
+          } catch (error) { if (mounted.current) setFailure(errorMessage(error)) }
+          finally { busy.current = false; if (mounted.current) setPhase('idle') }
+        }
+        const pending = phase !== 'idle'
+        return h('div', { className: 'trash-distill', 'aria-busy': pending },
+          h('button', { type: 'button', disabled: disabled || pending, onClick: () => { void choose() } }, t('distill')),
+          phase !== 'idle' && h('p', { role: 'status' }, t(phase === 'loading' ? 'distillLoading' : 'distillRunning')),
+          choices && h('div', { role: 'group', 'aria-label': t('distillChoose') },
+            h('p', { className: 'trash-panel-note' }, t('distillNotice')),
+            h('label', null, t('distillChoose'), h('select', {
+              value: selected, disabled: pending, 'aria-label': t('distillChoose'),
+              onChange: (event: { currentTarget: HTMLSelectElement }) => setSelected(event.currentTarget.value),
+            }, ...choices.map(choice => h('option', { key: choice.id, value: choice.id },
+              choice.id === '__manual__' ? t('distillManual') : `${choice.name} (${choice.id})`)))),
+            !choices.length && h('p', { role: 'status' }, t('distillNoAgents')),
+            h('button', { type: 'button', disabled: disabled || pending || !selected, onClick: () => { void run() } }, t('distillStart')),
+            h('button', { type: 'button', disabled: pending, onClick: () => setChoices(null) }, t('cancel'))),
+          failure && h('p', { className: 'trash-error', role: 'alert' }, t('distillFailed', { reason: failure })),
+          result && h('div', null,
+            h('p', { role: 'status' }, t(result.mode === 'agent' ? 'distillCompleted' : 'distillPromptSaved')),
+            h('p', { className: 'trash-panel-note' }, result.summary),
+            h('button', { type: 'button', onClick: () => setShowPath(true) }, t('distillFile')),
+            showPath && h('label', null, t('distillFileHint'), h('input', {
+              type: 'text', readOnly: true, value: result.path, title: result.path,
+              'aria-label': t('distillFile'), ref: selectFullId,
+              onFocus: (event: { currentTarget: HTMLInputElement }) => event.currentTarget.select(),
+            }))))
+      }
+
       function TrashRow(props: TrashRowProps): Element {
         const { t, sessionId, record } = props
         // Each row owns its selector hook, so list length/order never changes
@@ -280,6 +346,7 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
           h('div', { className: 'trash-panel-actions' },
             h('button', { type: 'button', disabled: props.pending || record.purgePending, onClick: props.onRestore }, t('restore')),
             h('button', { type: 'button', className: 'trash-danger', disabled: props.pending, onClick: props.onDelete }, t('deleteForever'))),
+          h(DistillAction, { sessionId, trash: props.trash, t, disabled: props.pending || !!record.purgePending }),
           props.confirming && h('div', { className: 'trash-panel-confirm', role: 'group',
             'aria-label': t('confirmDelete', { title }), onKeyDown: (event: KeyboardEvent) => {
               if (event.key === 'Escape' && !props.pending) props.onCancel()
@@ -378,7 +445,7 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
             entries?.length === 0 && !pending && !failure && h('p', { className: 'trash-panel-state', role: 'status' }, t('emptyState')),
             entries !== null && entries.length > 0 && h('ul', { className: 'trash-panel-list' },
               ...entries.map(([sessionId, record]) => h(TrashRow, {
-                key: sessionId, sessionId, record, t, useSessions: props.useSessions,
+                key: sessionId, sessionId, record, t, trash, useSessions: props.useSessions,
                 useWorkspaces: props.useWorkspaces, getLocale: props.getLocale, pending,
                 confirming: confirmation?.kind === 'delete' && confirmation.sessionId === sessionId,
                 onRestore: () => { void run('restoreFailed', async () => {
@@ -533,6 +600,8 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
           // One operation layer for every slot and panel, including empty's
           // global boundary. A component's own busy flag cannot order peers.
           const trash: TrashRemote = {
+            listDistillAgents: () => host.listDistillAgents(),
+            distillSession: (id, preset) => host.distillSession(id, preset),
             trashSession: id => write(id, () => host.trashSession(id),
               () => trashStore.upsert(id, { trashedAt: Date.now() })),
             restoreSession: id => write(id, () => host.restoreSession(id), () => {

@@ -17,6 +17,7 @@ Long session histories make the sidebar hard to navigate. Native archiving hides
 - **Move to system trash** after confirmation; move the whole local session log directory to macOS Trash or Windows Recycle Bin, then clean necessary registry records. System-level recovery remains available.
 - **Queue busy sessions** for automatic system-trash move retries after restarting DSH; Restore cancels the queue.
 - **Empty Trash** across workspaces, with separate moved, queued, and failed counts.
+- **Distill** a trashed conversation with a preset chosen for each run, saving a Markdown document without changing the source session.
 - **Audit operations** in a local JSONL log, with stages and failure reasons.
 
 The global panel lists sessions newest first, with titles, current workspaces, and English/Chinese UI text.
@@ -51,9 +52,24 @@ These instructions do not assume an npm release; do not use a bare `d-trash` reg
 | Panel → Restore | Return a session to the normal session list |
 | Panel → Move to system trash | Confirm moving that session's local logs to system trash |
 | Panel → Empty Trash | Confirm moving all Trash sessions to system trash |
+| Panel → Distill | Choose an agent preset, run a read-only task, then show the Markdown file path |
 | Panel → Refresh | Reload the list and workspace projection |
 
 Deletion requires inline confirmation; Cancel or Escape dismisses it. A queued session shows “Pending move to system trash (automatically retries after restarting DSH)”. Restore cancels its queue and keeps it archived in Trash with its logs and workspace membership; a later Restore uses the ordinary unarchive behavior. Once moving to system trash has started and a purge receipt exists, Restore is disabled: retry Move to system trash to finish cleanup.
+
+## Distillation
+
+Click **Distill** on a Trash row, choose a host agent preset, and start. DSH runs the selected preset with its **default model** in a separate task session; all tool execution is denied. The source is read through a read-only persistence handle, never resumed or write-locked by this operation, and keeps its marker, archive and workspace membership. The separate task has its own normal storage/lease and its logs are retained by DSH.
+
+Results include the source ID/title/time, generation time, preset, type (experience, operations, skill draft or requirements) and structured Markdown. The default is **`<source session cwd>/d-trash-distill/<date>-<shortid>-distill.md`**; existing files are retained with a unique suffix for later runs. **Show file path** selects the full path to copy into your editor or file manager. Progress and staged failures appear inline; choose again to retry. Tasks time out after five minutes and are cancelled on Host unload.
+
+| Host config | Default | Meaning |
+| --- | --- | --- |
+| `distillDir` | `""` | Empty uses the source session cwd plus `d-trash-distill`; otherwise an absolute directory. Required if the source has no cwd. Symlink/noncanonical paths and output under DSH’s persistence home are refused. |
+
+If agent/preset/default-model services are unavailable, **Export a prompt (manual)** saves a clearly labelled prompt with the transcript for you to send yourself. No model is run in manual mode. Agent failures do not silently fall back. Pending cleanup rows cannot be distilled. Empty or very large transcripts are refused; provider context limits can be lower than the two-million-character input limit. Generated content needs review.
+
+The integration was researched and probed against installed rc.5 with synthetic data and injected execution. No real model, real preset Loader run, Desktop GUI or Windows acceptance was performed; this does not extend the existing rc.2/rc.5 compatibility boundary. See [technical details and manual acceptance](./docs/DETAIL.md#p53-manual-acceptance).
 
 ## How it works
 

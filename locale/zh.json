@@ -38,6 +38,19 @@
     "copyFailed": "复制 ID 失败：{reason}",
     "clipboardUnavailable": "当前环境无法访问剪贴板。",
     "copyErrorUnknown": "剪贴板写入失败，未提供错误信息。",
-    "copyManually": "下方已选中完整 ID，请按 Cmd/Ctrl+C 复制。"
+    "copyManually": "下方已选中完整 ID，请按 Cmd/Ctrl+C 复制。",
+    "distill": "提炼",
+    "distillLoading": "正在读取 agent 列表…",
+    "distillRunning": "正在读取并提炼…",
+    "distillChoose": "选择 agent",
+    "distillNotice": "将只读转录交由所选 preset，通过 DSH 默认模型在独立任务会话中执行；所有工具执行均被拒绝。源会话保留在回收站。手动导出不调用模型。",
+    "distillManual": "导出提示词（手动）",
+    "distillNoAgents": "暂无可用 agent，请重新读取后重试。",
+    "distillStart": "开始",
+    "distillFailed": "提炼失败，请重新选择 agent 后重试：{reason}",
+    "distillCompleted": "提炼结果已保存。",
+    "distillPromptSaved": "提示词已保存，请自行发送给 agent 完成提炼；尚未调用模型。",
+    "distillFile": "显示文件路径",
+    "distillFileHint": "复制此路径，在编辑器或文件管理器中打开。"
   }
 }

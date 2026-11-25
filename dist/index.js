@@ -36,6 +36,9 @@ import { Service } from '@deepseek-ai/cordis';
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { z } from 'zod';
+import Schema from '@deepseek-ai/schemastery';
+import { SessionDistiller, DistillError } from './distill.js';
+import { sessionReader, agentExecutor, listDistillAgents } from './distill-host.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { SessionPurger, PurgeError } from './purge.js';
 import { TrashErrorCode, DeferredError } from './types.js';
@@ -57,6 +60,9 @@ const trashDomain = defineDomain({
         })),
     },
 });
+export const Config = Schema.object({
+    distillDir: Schema.string().default(''),
+});
 let TrashService = (() => {
     let _classSuper = TypertRemoteService;
     let _instanceExtraInitializers = [];
@@ -64,6 +70,8 @@ let TrashService = (() => {
     let _restoreSession_decorators;
     let _removeFromTrash_decorators;
     let _emptyTrash_decorators;
+    let _listDistillAgents_decorators;
+    let _distillSession_decorators;
     let _listTrash_decorators;
     return class TrashService extends _classSuper {
         static {
@@ -72,16 +80,22 @@ let TrashService = (() => {
             _restoreSession_decorators = [Remote('restoreSession')];
             _removeFromTrash_decorators = [Remote('removeFromTrash')];
             _emptyTrash_decorators = [Remote('emptyTrash')];
+            _listDistillAgents_decorators = [Remote('listDistillAgents')];
+            _distillSession_decorators = [Remote('distillSession')];
             _listTrash_decorators = [Remote('listTrash')];
             __esDecorate(this, null, _trashSession_decorators, { kind: "method", name: "trashSession", static: false, private: false, access: { has: obj => "trashSession" in obj, get: obj => obj.trashSession }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _restoreSession_decorators, { kind: "method", name: "restoreSession", static: false, private: false, access: { has: obj => "restoreSession" in obj, get: obj => obj.restoreSession }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _removeFromTrash_decorators, { kind: "method", name: "removeFromTrash", static: false, private: false, access: { has: obj => "removeFromTrash" in obj, get: obj => obj.removeFromTrash }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _emptyTrash_decorators, { kind: "method", name: "emptyTrash", static: false, private: false, access: { has: obj => "emptyTrash" in obj, get: obj => obj.emptyTrash }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _listDistillAgents_decorators, { kind: "method", name: "listDistillAgents", static: false, private: false, access: { has: obj => "listDistillAgents" in obj, get: obj => obj.listDistillAgents }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _distillSession_decorators, { kind: "method", name: "distillSession", static: false, private: false, access: { has: obj => "distillSession" in obj, get: obj => obj.distillSession }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _listTrash_decorators, { kind: "method", name: "listTrash", static: false, private: false, access: { has: obj => "listTrash" in obj, get: obj => obj.listTrash }, metadata: _metadata }, null, _instanceExtraInitializers);
             if (_metadata) Object.defineProperty(this, Symbol.metadata, { enumerable: true, configurable: true, writable: true, value: _metadata });
         }
+        static Config = Config;
         static inject = ['typert', 'storageDomain', 'workspaceRegistry', 'sessionPersistence'];
-        purger = __runInitializers(this, _instanceExtraInitializers);
+        distiller = __runInitializers(this, _instanceExtraInitializers);
+        purger;
         operationLog;
         action = new AsyncLocalStorage();
         domainPromise;
@@ -92,7 +106,7 @@ let TrashService = (() => {
         startupTimer;
         startupStarted = false;
         startupSettled = new Set();
-        constructor(ctx) {
+        constructor(ctx, config = { distillDir: '' }, dependencies = {}) {
             super(ctx, 'trash', { namespace: 'trash' });
             this.purger = new SessionPurger(async (id) => {
                 const persistence = this.ctx.get('sessionPersistence');
@@ -101,8 +115,15 @@ let TrashService = (() => {
                 return persistence.stat(id);
             }, (id, stage) => this.report(id, stage, 'ok'));
             this.operationLog = new OperationLog(id => this.logHome(id), line => this.ctx.logger.info(line));
+            this.distiller = new SessionDistiller(dependencies.reader ?? sessionReader(() => {
+                const persistence = this.ctx.get('sessionPersistence');
+                if (!persistence)
+                    throw new Error('TrashService requires sessionPersistence');
+                return persistence;
+            }, id => this.purger.home(id)), dependencies.executor ?? agentExecutor(ctx), config.distillDir);
             ctx.effect(() => async () => {
                 this.stopped = true;
+                this.distiller.dispose();
                 clearTimeout(this.startupTimer);
                 await this.exclusive(async () => {
                     // An unsuccessful open owns no handle; close failures still propagate.
@@ -267,6 +288,34 @@ let TrashService = (() => {
                     throw new DeferredError(`Move to system trash: ${deleted} deleted, 0 failed, ${deferred} queued`, undefined);
                 return deleted;
             }, 'summary', () => `${deleted} deleted, ${failed} failed, ${deferred} queued`));
+        }
+        async listDistillAgents() {
+            if (this.stopped)
+                throw new Error('Trash Host is unloading');
+            return listDistillAgents(this.ctx);
+        }
+        async distillSession(sessionId, agentPresetId) {
+            if (this.stopped)
+                throw new Error('Trash Host is unloading');
+            return this.forSession(sessionId, async () => {
+                await this.operationLog.write('distill', sessionId, 'started', 'ok');
+                try {
+                    if (this.stopped)
+                        throw new Error('Trash Host is unloading');
+                    const record = (await this.domain()).table('trash').get(sessionId);
+                    if (!record || record.purge || !this.workspaceRegistry().archivedSessionIds.includes(sessionId)) {
+                        throw new Error('Session must be in trash without pending cleanup');
+                    }
+                    const result = await this.distiller.run(sessionId, agentPresetId);
+                    await this.operationLog.write('distill', sessionId, 'completed', 'ok', result.mode);
+                    return result;
+                }
+                catch (error) {
+                    const failure = error instanceof DistillError ? error : new DistillError('gate', sessionId, error);
+                    await this.operationLog.write('distill', sessionId, 'failed', 'failed', failure);
+                    throw failure;
+                }
+            });
         }
         async report(sessionId, stage, result, error) {
             await this.operationLog.write(this.action.getStore() ?? 'removeFromTrash', sessionId, stage, result, error);

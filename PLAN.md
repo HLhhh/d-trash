@@ -1,6 +1,6 @@
 # d-trash（回收站）方案
 
-> 当前终态以第 5.2 期为准。第 4 期的 staging→rm / 不可恢复描述保留为历史，已被 5.2 系统回收站方案废弃；旧凭据仍兼容恢复。
+> 删除终态以第 5.2 期为准，提炼以第 5.3 期为准。第 4 期的 staging→rm / 不可恢复描述保留为历史，已被 5.2 系统回收站方案废弃；旧凭据仍兼容恢复。
 
 > **已交付**：第 0–4 期及评审修复、持久化操作日志（2026-11-22）；删除完成后的 Client 目录移除通知（2026-11-23，见末尾交付小节）。既有真机验收已通过：第 2 期入口和第 4 期两个会话的物理清理；详见本文验收记录。
 > 本次开源整理只改插件项目、运行隔离验证；没有安装/重载 bundle、修改核心/profile、启动 web server 或操作真实会话，不代表本轮完成真机复验。
@@ -536,7 +536,7 @@ Host 的两条成功分支共用 `purgeSession`：确认日志已删除或首次
 
 **边界**：这是 GUI 功能验收，不是测试套件验收——`npm test` 里 6 项 Windows 专属原生场景（大小写折叠信号量互斥、junction 会话路径拒绝、共享冲突重试、重试时的归档门禁、暂存恢复的原路径信号量、deny-delete 句柄在有界重试后放行）仍只在 macOS 上"明确跳过"，未在 Windows 上执行；rc.2 桌面 GUI 亦未验证。兼容性表、README、DETAIL 均按此界线表述，不扩大声明。
 
-## 第 5 期：回收站增强（sessionId / 系统回收站 / 提炼 agent）— 方案待确认
+## 第 5 期：回收站增强（sessionId / 系统回收站 / 提炼 agent）— 已交付（5.3：2026-11-26，隔离验收）
 
 ### 目标
 
@@ -565,14 +565,17 @@ Host 的两条成功分支共用 `purgeSession`：确认日志已删除或首次
 - 隔离验收：可注入接口将目录移入临时模拟回收站；覆盖成功/失败/移动前后中断/真实 SIGKILL/写锁排队/旧凭据/跨卷拒绝/不支持平台/清空汇总，保留原路径竞态与 UI 回归；macOS 原生 rename ABI 仅使用注入的临时用户目录，绝不写真实 `~/.Trash`。build/test/安装版 rc.5 discovery/pack dry-run 的本轮结果见本地 `CODEX_P5_2.md`；5.2 macOS/Windows 系统回收站 GUI 验收尚未进行，步骤见 DETAIL。
 - 明确不做：不 copy 跨卷、不提供物理删除旁路、不改 DSH 核心/profile、不安装 bundle、不碰真实会话，不动 5.1 / 5.3。
 
-#### 5.3 提炼功能（最复杂，需先调研 agent 调用能力）
+#### 5.3 提炼功能 — 已交付（2026-11-26，隔离验收）
 
-- **待调研**：插件内如何以「指定 agent」处理指定会话——`agents` / `sessionController.create`、`Agent.send`，或复用 `subagent` 机制；以及被回收会话的正文从哪里读（直读 JSONL 事件、还是先 `restore` 再用 `resolveAgent`）。
-- **产出形态待定**：Markdown 文件（放到工作区哪个目录）、新会话里的结果、还是 skill 草案文件。
-- **UI**：「提炼」按钮 → 使用配置里指定的 agent（或点按钮时选择）→ 异步执行 → 行内进度与结果入口；失败可重试。
-- **必须的安全约束**：提炼只读、不改回收站状态；不得因此解锁/抢占写租约；默认不把会话内容发往外部（沿用 DSH 的模型路由）。
-- 验收（待调研后细化）：指定 agent 被真正调用、产出可定位、失败可诊断、并发多次提炼互不串扰、不改变回收站状态。
-- 风险：高（agent 生命周期、并发、长任务、产出落盘位置）。
+- 目标/范围：每行「提炼」→ 每次选择宿主可用 preset → 行内进度/错误/结果 → 显示完整文件路径，复制到编辑器或文件管理器打开。结果为 Markdown，保留源会话 marker、归档、归属和日志，不自动安装 skill。
+- 调研（先于实现）：安装版 rc.5 / Electron 44.7.0 源码和隔离探针证实 `ctx.agents.create({sessionId, agentOptions, meta, signal, setup})` 需要独立执行会话；在 setup 中 `agentPresets.mount(childCtx,id)`。`sessionController.resolveAgent` 可以 resume 原会话并取得写句柄，**不使用**；原生 `sessionController.create` 还可能复用/附加工作区，不用于此任务。subagent 的同进程路径也是新 Agent + preset setup + send/whenIdle，但要求活跃 parent/manager 语义，不复用被回收会话充当 parent。
+- 模型来源：preset 是插件组合，不保证自带模型。沿用原生新会话的公开 `agentDefaultModel.currentSelection()` 提供 provider/model/effort，传给独立 Agent；不调用私有接口、不硬编码模型、不把 `ctx.llm` 补全伪装成 agent。`agentPresets.list()` 的非 broken 行提供 id / name（缺名用 id，内置名不另造一份翻译）。缺执行/默认模型服务时提供明确的手动提示词导出；真实运行失败仍按阶段报错，不偷偷降级为成功。
+- 读取：`sessionPersistence.open(id,'read',{signal})` → `handle.read()` → detached `Session.create(...).deriveMessages()` → role/content JSON 转录 → finally close；不进 SessionStore、不 restore/resolveAgent/resume、不获取源写租约、不读附件/工作区文件或 provider replay state。JSONL 路径由 stat 校验并反推 home；现实现要求有可靠 JSONL home。超过 2 百万字符或空转录拒绝，不静默截断。
+- 执行：仅新任务会话持有其自己的写租约；所选 preset 在独立 scoped context 挂载，`tools.restrict({allow:[]})` 加最终 `tools.guard` 拒绝所有工具执行。`Agent.send(message,'next-turn',true)` 后等 `whenIdle()`，核对 `turn/end` 为 completed，从最后非空 assistant 文本解析 `{type,body}`；类型限经验/操作记录/skill 草案/新需求。结束 dispose owned handle。独立任务日志由宿主保留，不自动删除，也不把其结果作为新的交付聊天。
+- 产出：schemastery `Config.distillDir`（空串默认源会话 cwd 下 `d-trash-distill`；可配绝对目录）。缺 cwd 需配置；拒绝相对目录、非 canonical 路径及 DSH home 内目录。文件含源 id/标题/源时间/生成时间/preset/mode/提炼类型/结构化正文；默认 `<date>-<shortid>-distill.md`，重名加 UUID，排他创建保留已有文件。手动文件显式标 prompt / 尚未运行模型，包含可发送的提示词。
+- 并发/失败：新增 Remote `distillSession(sessionId,agentPresetId)`、`listDistillAgents()`。复用按 sessionId 串行与 purge/empty 全局边界，不修改 5.1/5.2 行为；不同会话可并发。gate/read/path/agent/write 错误含 sessionId，可重新读取与执行；五分钟超时/卸载 abort，接纳队列取消后收敛再关 domain，迟到 read/factory 资源最终关闭。不是持久任务队列，退出不自动续跑。审计 action=distill，started/completed/failed，best effort；手动 completed 的 reason=prompt。
+- 验收：build/test/安装版 rc.5 discovery/pack dry-run；注入 reader/executor 覆盖成功、读取/agent 失败重试、并发隔离、只读哈希、持源写锁仍可提炼、卸载、真实 scoped 工具拒绝、双语选择/进度/结果路径。安装版真实 Registry/roster/default-model 服务和生产适配器由合成 factory/mount 验证，JSONL/Session 读取为真实实现。**未调用真实模型，未完成真实 preset 挂载+模型的端到端或 GUI/Windows 复验**；详情和证据见 DETAIL 与本地 CODEX_P5_3.md。
+- 明确不做：不改 DSH 核心/profile、不 install_bundle、不碰真实会话，不改包身份/内部 id/domain version，不 resume 源会话、不夺源写锁、不改 marker/归档/归属、不替换 5.1/5.2，不自动写 skill 目录、不自动打开未经核实的私有文件 API。旧「先 restore 再 resolveAgent」「全局固定 agent」「产出形态待定」均**已废弃**，因为违背已确认的只读与每次选择/Markdown 决策。
 
 ### 明确不做什么
 
@@ -585,12 +588,12 @@ Host 的两条成功分支共用 `purgeSession`：确认日志已删除或首次
 | 问题 | 结论 |
 | --- | --- |
 | 5.2 是否保留直接物理删除 | **不保留**。「彻底删除 / 清空」只移入系统回收站（macOS 废纸篓 / Windows 回收站）；插件只管把自己的 marker / 归档 / 归属 / 投影缓存清掉，不再直接 `rm` |
-| 5.3 提炼产出形态 | **写成 Markdown 文件**（路径可配置，默认落在当前工作区的固定子目录）；不发散到新会话 |
+| 5.3 提炼产出形态 | **写成 Markdown 文件**（路径可配置，默认源会话 cwd 下 `d-trash-distill`）；不把结果交付为新聊天；执行所需独立任务会话由宿主保存 |
 | 5.3 agent 如何指定 | **每次点击时选择**（面板里点「提炼」→ 选择 agent → 执行），不做全局固定配置 |
 
 #### 由决策推导出的实现约束
 
 - 5.2：`AGENTS.md` 的不变量 3 必须改写——旧表述「彻底删除 = 物理删除、不可恢复」**已废弃**，新表述为「移入系统回收站、可在系统层面恢复；插件不保证不可恢复，也无法感知用户何时清空系统回收站」。
 - 5.2：intent 不再记录可预测的 target 目录（系统回收站会同名改名），改为记录「已开始移动」标记 + 源路径；崩溃恢复只判断源是否还在。
-- 5.3：agent 选择列表来自宿主可用的 agent preset；提炼只读会话内容，不改回收站状态、不占写租约。
+- 5.3：agent 选择列表来自宿主可用的 agent preset；提炼只读源会话内容，不改回收站状态、不占源写租约；独立执行会话持有自己的正常租约。
 - 5.3：Markdown 文件名需可预期（如 `<日期>-<短id>-distill.md`），并在面板给出「打开文件」入口。

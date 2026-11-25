@@ -74,6 +74,7 @@ async function main() {
   emit('runtime', { node: process.versions.node, electron: process.versions.electron,
     dsh: installed('@deepseek-ai/dsh/package.json').version })
   await require('./platform-evidence.cjs')(installed, emit)
+  await require('./distill-evidence.cjs')(installed, emit)
   const evidence = await require('./workspace-evidence.cjs')(installed, emit)
   const { ClientWorkspaceModel, visibleSessionIds, WorkspaceController } = evidence
   // Load an existing version-1 trash.json with the installed JSON backend.
@@ -148,7 +149,7 @@ async function main() {
   assert.equal(fresh.registrations.length, 1)
   const contribution = fresh.registrations[0]
   assert.equal(contribution.package, manifest.name)
-  assert.equal(contribution.invocations.length, 5)
+  assert.equal(contribution.invocations.length, 7)
   emit('resolveArtifact', { artifact: path.join(root, 'dist/typert.host.js'),
     registrations: fresh.registrations.length, services: contribution.model.services.map(s => s.key),
     invocations: contribution.invocations.length })
@@ -238,7 +239,9 @@ async function main() {
       wire = { route, endpoint, payload }
       if (endpoint === 'trash/trashSession') hostArchived.add(payload.args.sessionId)
       if (endpoint === 'trash/restoreSession') hostArchived.delete(payload.args.sessionId)
-      const value = endpoint === 'trash/listTrash' ? []
+      const value = endpoint === 'trash/distillSession' ? { path: '/synthetic/distill.md', summary: 'Summary', mode: 'agent' }
+        : endpoint === 'trash/listDistillAgents' ? [{ id: 'probe', name: 'Probe preset' }]
+        : endpoint === 'trash/listTrash' ? []
         : endpoint === 'trash/removeFromTrash' ? true : endpoint === 'trash/emptyTrash' ? 2 : undefined
       return { ok: true, value }
     },
@@ -308,6 +311,8 @@ async function main() {
   const panelRemote = slots.get('trash-main').inject().trash
   const panelWire = []
   for (const [method, args, expected] of [
+    ['listDistillAgents', [], [{ id: 'probe', name: 'Probe preset' }]],
+    ['distillSession', ['source-only', 'probe'], { path: '/synthetic/distill.md', summary: 'Summary', mode: 'agent' }],
     ['listTrash', [], []], ['restoreSession', ['restore-session'], undefined],
     ['removeFromTrash', ['remove-session'], true], ['emptyTrash', [], 2],
   ]) {
@@ -315,7 +320,7 @@ async function main() {
     assert.equal(result.ok, true)
     assert.deepEqual(result.value, expected)
     assert.deepEqual(JSON.parse(JSON.stringify(wire)), { route: '/api', endpoint: `trash/${method}`,
-      payload: { args: args.length ? { sessionId: args[0] } : {} } })
+      payload: { args: args.length ? { sessionId: args[0], ...(args.length > 1 ? { agentPresetId: args[1] } : {}) } : {} } })
     panelWire.push(wire)
   }
   emit('phase3-panel-Gateway-RPC', { sidebarId: slots.get('trash').id,
@@ -333,6 +338,7 @@ async function main() {
   await import('./operation-log-regressions.mjs')
   await import('./deferred-regressions.mjs')
   await import('./reappear-regressions.mjs')
+  await import('./distill-regressions.mjs')
   assert.deepEqual(hashes(), before, 'Protected documents and real profile files must remain unchanged')
   console.log('PASS: installed resolver, Typert scan/cache, real Loader/ClientModules, Gateway inject reproduction and slot RPC lifecycle; profile unchanged')
 }

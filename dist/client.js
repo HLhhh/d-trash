@@ -50,7 +50,20 @@
       copyFailed: "Could not copy ID: {reason}",
       clipboardUnavailable: "Clipboard access is unavailable in this context.",
       copyErrorUnknown: "Clipboard write failed without an error message.",
-      copyManually: "Full ID selected below. Press Cmd/Ctrl+C to copy."
+      copyManually: "Full ID selected below. Press Cmd/Ctrl+C to copy.",
+      distill: "Distill",
+      distillLoading: "Loading agent presets\u2026",
+      distillRunning: "Reading and distilling\u2026",
+      distillChoose: "Choose an agent",
+      distillNotice: "Sends the read-only transcript to the DSH default model using the selected preset in a separate task session. All tool execution is denied. The source stays in trash. Manual export runs no model.",
+      distillManual: "Export a prompt (manual)",
+      distillNoAgents: "No agent presets available. Refresh to retry.",
+      distillStart: "Start",
+      distillFailed: "Distillation failed; choose an agent again to retry: {reason}",
+      distillCompleted: "Distillation saved.",
+      distillPromptSaved: "Prompt saved. Send it to your agent to complete distillation; no model was run.",
+      distillFile: "Show file path",
+      distillFileHint: "Copy this path and open it in your editor or file manager."
     }
   };
 
@@ -95,7 +108,20 @@
       copyFailed: "\u590D\u5236 ID \u5931\u8D25\uFF1A{reason}",
       clipboardUnavailable: "\u5F53\u524D\u73AF\u5883\u65E0\u6CD5\u8BBF\u95EE\u526A\u8D34\u677F\u3002",
       copyErrorUnknown: "\u526A\u8D34\u677F\u5199\u5165\u5931\u8D25\uFF0C\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\u3002",
-      copyManually: "\u4E0B\u65B9\u5DF2\u9009\u4E2D\u5B8C\u6574 ID\uFF0C\u8BF7\u6309 Cmd/Ctrl+C \u590D\u5236\u3002"
+      copyManually: "\u4E0B\u65B9\u5DF2\u9009\u4E2D\u5B8C\u6574 ID\uFF0C\u8BF7\u6309 Cmd/Ctrl+C \u590D\u5236\u3002",
+      distill: "\u63D0\u70BC",
+      distillLoading: "\u6B63\u5728\u8BFB\u53D6 agent \u5217\u8868\u2026",
+      distillRunning: "\u6B63\u5728\u8BFB\u53D6\u5E76\u63D0\u70BC\u2026",
+      distillChoose: "\u9009\u62E9 agent",
+      distillNotice: "\u5C06\u53EA\u8BFB\u8F6C\u5F55\u4EA4\u7531\u6240\u9009 preset\uFF0C\u901A\u8FC7 DSH \u9ED8\u8BA4\u6A21\u578B\u5728\u72EC\u7ACB\u4EFB\u52A1\u4F1A\u8BDD\u4E2D\u6267\u884C\uFF1B\u6240\u6709\u5DE5\u5177\u6267\u884C\u5747\u88AB\u62D2\u7EDD\u3002\u6E90\u4F1A\u8BDD\u4FDD\u7559\u5728\u56DE\u6536\u7AD9\u3002\u624B\u52A8\u5BFC\u51FA\u4E0D\u8C03\u7528\u6A21\u578B\u3002",
+      distillManual: "\u5BFC\u51FA\u63D0\u793A\u8BCD\uFF08\u624B\u52A8\uFF09",
+      distillNoAgents: "\u6682\u65E0\u53EF\u7528 agent\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u91CD\u8BD5\u3002",
+      distillStart: "\u5F00\u59CB",
+      distillFailed: "\u63D0\u70BC\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9 agent \u540E\u91CD\u8BD5\uFF1A{reason}",
+      distillCompleted: "\u63D0\u70BC\u7ED3\u679C\u5DF2\u4FDD\u5B58\u3002",
+      distillPromptSaved: "\u63D0\u793A\u8BCD\u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u81EA\u884C\u53D1\u9001\u7ED9 agent \u5B8C\u6210\u63D0\u70BC\uFF1B\u5C1A\u672A\u8C03\u7528\u6A21\u578B\u3002",
+      distillFile: "\u663E\u793A\u6587\u4EF6\u8DEF\u5F84",
+      distillFileHint: "\u590D\u5236\u6B64\u8DEF\u5F84\uFF0C\u5728\u7F16\u8F91\u5668\u6216\u6587\u4EF6\u7BA1\u7406\u5668\u4E2D\u6253\u5F00\u3002"
     }
   };
 
@@ -317,6 +343,11 @@
   .trash-panel-meta, .trash-panel-note { color:var(--dsw-alias-label-tertiary); font-size:13px; overflow-wrap:anywhere; }
   .trash-panel-confirm { margin:12px 0; padding:12px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; }
   .trash-panel-state { padding:40px 0; text-align:center; color:var(--dsw-alias-label-tertiary); }
+  .trash-distill { margin-top:8px; }
+  .trash-distill select, .trash-distill input { box-sizing:border-box; max-width:100%; padding:6px;
+    border:1px solid var(--dsw-alias-border-l2); border-radius:4px;
+    background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:inherit; }
+  .trash-distill input { display:block; width:100%; }
   .trash-panel .trash-error { max-width:none; padding:8px 0; }
   @media (max-width:600px) { .trash-panel { padding-inline:16px; } }
   `;
@@ -450,6 +481,106 @@
             )
           );
         }
+        function DistillAction({ sessionId, trash, t, disabled }) {
+          const [choices, setChoices] = React.useState(null);
+          const [selected, setSelected] = React.useState("");
+          const [phase, setPhase] = React.useState("idle");
+          const [failure2, setFailure] = React.useState(null);
+          const [result, setResult] = React.useState(null);
+          const [showPath, setShowPath] = React.useState(false);
+          const mounted = React.useRef(false);
+          const busy = React.useRef(false);
+          React.useEffect(() => {
+            mounted.current = true;
+            return () => {
+              mounted.current = false;
+            };
+          }, []);
+          const choose = async () => {
+            if (busy.current) return;
+            busy.current = true;
+            setPhase("loading");
+            setFailure(null);
+            try {
+              const rows = unwrap(await trash.listDistillAgents());
+              if (mounted.current) {
+                setChoices(rows);
+                setSelected(rows[0]?.id ?? "");
+              }
+            } catch (error62) {
+              if (mounted.current) setFailure(errorMessage(error62));
+            } finally {
+              busy.current = false;
+              if (mounted.current) setPhase("idle");
+            }
+          };
+          const run = async () => {
+            if (busy.current || !selected) return;
+            busy.current = true;
+            setPhase("running");
+            setFailure(null);
+            setResult(null);
+            setShowPath(false);
+            try {
+              const value = unwrap(await trash.distillSession(sessionId, selected));
+              if (mounted.current) {
+                setResult(value);
+                setChoices(null);
+              }
+            } catch (error62) {
+              if (mounted.current) setFailure(errorMessage(error62));
+            } finally {
+              busy.current = false;
+              if (mounted.current) setPhase("idle");
+            }
+          };
+          const pending = phase !== "idle";
+          return h(
+            "div",
+            { className: "trash-distill", "aria-busy": pending },
+            h("button", { type: "button", disabled: disabled || pending, onClick: () => {
+              void choose();
+            } }, t("distill")),
+            phase !== "idle" && h("p", { role: "status" }, t(phase === "loading" ? "distillLoading" : "distillRunning")),
+            choices && h(
+              "div",
+              { role: "group", "aria-label": t("distillChoose") },
+              h("p", { className: "trash-panel-note" }, t("distillNotice")),
+              h("label", null, t("distillChoose"), h("select", {
+                value: selected,
+                disabled: pending,
+                "aria-label": t("distillChoose"),
+                onChange: (event) => setSelected(event.currentTarget.value)
+              }, ...choices.map((choice) => h(
+                "option",
+                { key: choice.id, value: choice.id },
+                choice.id === "__manual__" ? t("distillManual") : `${choice.name} (${choice.id})`
+              )))),
+              !choices.length && h("p", { role: "status" }, t("distillNoAgents")),
+              h("button", { type: "button", disabled: disabled || pending || !selected, onClick: () => {
+                void run();
+              } }, t("distillStart")),
+              h("button", { type: "button", disabled: pending, onClick: () => setChoices(null) }, t("cancel"))
+            ),
+            failure2 && h("p", { className: "trash-error", role: "alert" }, t("distillFailed", { reason: failure2 })),
+            result && h(
+              "div",
+              null,
+              h("p", { role: "status" }, t(result.mode === "agent" ? "distillCompleted" : "distillPromptSaved")),
+              h("p", { className: "trash-panel-note" }, result.summary),
+              h("button", { type: "button", onClick: () => setShowPath(true) }, t("distillFile")),
+              showPath && h("label", null, t("distillFileHint"), h("input", {
+                type: "text",
+                readOnly: true,
+                value: result.path,
+                title: result.path,
+                "aria-label": t("distillFile"),
+                ref: selectFullId,
+                onFocus: (event) => event.currentTarget.select()
+              }))
+            )
+          );
+        }
         function TrashRow(props) {
           const { t, sessionId, record: record2 } = props;
           const liveTitle = props.useSessions((state) => {
@@ -487,6 +618,7 @@
               h("button", { type: "button", disabled: props.pending || record2.purgePending, onClick: props.onRestore }, t("restore")),
               h("button", { type: "button", className: "trash-danger", disabled: props.pending, onClick: props.onDelete }, t("deleteForever"))
             ),
+            h(DistillAction, { sessionId, trash: props.trash, t, disabled: props.pending || !!record2.purgePending }),
             props.confirming && h(
               "div",
               {
@@ -643,6 +775,7 @@
                   sessionId,
                   record: record2,
                   t,
+                  trash,
                   useSessions: props.useSessions,
                   useWorkspaces: props.useWorkspaces,
                   getLocale: props.getLocale,
@@ -844,6 +977,8 @@
               return result;
             };
             const trash = {
+              listDistillAgents: () => host.listDistillAgents(),
+              distillSession: (id, preset) => host.distillSession(id, preset),
               trashSession: (id) => write(
                 id,
                 () => host.trashSession(id),
@@ -20766,8 +20901,23 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   };
 
   // dist/typert.remote-client.js
+  var d_trash_trash_distillSession_parameter_0$schema$value;
+  var d_trash_trash_distillSession_parameter_0$schema = () => d_trash_trash_distillSession_parameter_0$schema$value ??= external_exports.string();
+  var d_trash_trash_distillSession_parameter_1$schema$value;
+  var d_trash_trash_distillSession_parameter_1$schema = () => d_trash_trash_distillSession_parameter_1$schema$value ??= external_exports.string();
+  var d_trash_trash_distillSession_result$schema$value;
+  var d_trash_trash_distillSession_result$schema = () => d_trash_trash_distillSession_result$schema$value ??= external_exports.object({
+    "path": external_exports.string(),
+    "summary": external_exports.string(),
+    "mode": external_exports.union([external_exports.literal("agent"), external_exports.literal("prompt")])
+  });
   var d_trash_trash_emptyTrash_result$schema$value;
   var d_trash_trash_emptyTrash_result$schema = () => d_trash_trash_emptyTrash_result$schema$value ??= external_exports.number();
+  var d_trash_trash_listDistillAgents_result$schema$value;
+  var d_trash_trash_listDistillAgents_result$schema = () => d_trash_trash_listDistillAgents_result$schema$value ??= external_exports.array(external_exports.object({
+    "id": external_exports.string(),
+    "name": external_exports.string()
+  }));
   var d_trash_trash_listTrash_result$schema$value;
   var d_trash_trash_listTrash_result$schema = () => d_trash_trash_listTrash_result$schema$value ??= external_exports.array(external_exports.tuple([external_exports.string(), external_exports.object({
     "purgePending": external_exports.union([external_exports.undefined(), external_exports.literal(false), external_exports.literal(true)]).optional().describe("Host retains a private purge receipt; show diagnosis and allow deletion retry."),
@@ -20788,6 +20938,10 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   var d_trash_trash_trashSession_parameter_0$schema = () => d_trash_trash_trashSession_parameter_0$schema$value ??= external_exports.string();
   var d_trash_trash_trashSession_result$schema$value;
   var d_trash_trash_trashSession_result$schema = () => d_trash_trash_trashSession_result$schema$value ??= external_exports.void();
+  var d_trash_trash_distillSession_parameter_0_strict$schema$value;
+  var d_trash_trash_distillSession_parameter_0_strict$schema = () => d_trash_trash_distillSession_parameter_0_strict$schema$value ??= external_exports.string();
+  var d_trash_trash_distillSession_parameter_1_strict$schema$value;
+  var d_trash_trash_distillSession_parameter_1_strict$schema = () => d_trash_trash_distillSession_parameter_1_strict$schema$value ??= external_exports.string();
   var d_trash_trash_removeFromTrash_parameter_0_strict$schema$value;
   var d_trash_trash_removeFromTrash_parameter_0_strict$schema = () => d_trash_trash_removeFromTrash_parameter_0_strict$schema$value ??= external_exports.string();
   var d_trash_trash_restoreSession_parameter_0_strict$schema$value;
@@ -20797,6 +20951,51 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   var TYPERT_REMOTE = createTypertRemoteInfo({
     package: "d-trash",
     methods: {
+      "trash/distillSession": {
+        service: "trash",
+        invocation: { kind: "direct" },
+        parameters: [
+          {
+            name: "sessionId",
+            source: "json",
+            codec: {
+              mode: "strict",
+              typeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
+              create: d_trash_trash_distillSession_parameter_0$schema,
+              jsonSchema: { "type": "string" }
+            },
+            strictCodec: {
+              mode: "strict",
+              typeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
+              create: d_trash_trash_distillSession_parameter_0_strict$schema,
+              jsonSchema: { "type": "string" }
+            }
+          },
+          {
+            name: "agentPresetId",
+            source: "json",
+            codec: {
+              mode: "strict",
+              typeSymbol: "d-trash#trash/distillSession:agentPresetId",
+              create: d_trash_trash_distillSession_parameter_1$schema,
+              jsonSchema: { "type": "string" }
+            },
+            strictCodec: {
+              mode: "strict",
+              typeSymbol: "d-trash#trash/distillSession:agentPresetId",
+              create: d_trash_trash_distillSession_parameter_1_strict$schema,
+              jsonSchema: { "type": "string" }
+            }
+          }
+        ],
+        result: {
+          mode: "strict",
+          typeSymbol: "d-trash/types#DistillResult",
+          create: d_trash_trash_distillSession_result$schema,
+          jsonSchema: { "type": "object", "properties": { "path": { "type": "string" }, "summary": { "type": "string" }, "mode": { "type": "string", "enum": ["agent", "prompt"] } }, "required": ["path", "summary", "mode"], "additionalProperties": true }
+        },
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 253, "column": 9 }
+      },
       "trash/emptyTrash": {
         service: "trash",
         description: "Each item commits independently; failures retain markers and name their stages.",
@@ -20808,7 +21007,19 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_emptyTrash_result$schema,
           jsonSchema: { "type": "number" }
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 204, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 222, "column": 9 }
+      },
+      "trash/listDistillAgents": {
+        service: "trash",
+        invocation: { kind: "direct" },
+        parameters: [],
+        result: {
+          mode: "strict",
+          typeSymbol: "d-trash#trash/listDistillAgents:result",
+          create: d_trash_trash_listDistillAgents_result$schema,
+          jsonSchema: { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" } }, "required": ["id", "name"], "additionalProperties": true } }
+        },
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 247, "column": 9 }
       },
       "trash/listTrash": {
         service: "trash",
@@ -20821,7 +21032,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_listTrash_result$schema,
           jsonSchemaError: "typert tool schema: unsupported selected tuple type"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 382, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 428, "column": 9 }
       },
       "trash/removeFromTrash": {
         service: "trash",
@@ -20851,7 +21062,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_removeFromTrash_result$schema,
           jsonSchema: { "type": "boolean" }
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 195, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 213, "column": 9 }
       },
       "trash/restoreSession": {
         service: "trash",
@@ -20881,7 +21092,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_restoreSession_result$schema,
           jsonSchemaError: "typert tool schema: unsupported void value"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 168, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 186, "column": 9 }
       },
       "trash/trashSession": {
         service: "trash",
@@ -20911,7 +21122,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_trashSession_result$schema,
           jsonSchemaError: "typert tool schema: unsupported void value"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 136, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 154, "column": 9 }
       }
     }
   }, external_exports);
