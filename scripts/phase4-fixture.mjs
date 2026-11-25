@@ -1,9 +1,12 @@
 import { Context } from '@deepseek-ai/cordis'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+import { randomUUID } from 'node:crypto'
+import { isCanonicalPath } from '../dist/fs-retry.js'
+import { requireSameDevice } from '../dist/system-trash.js'
 import TrashService from '../dist/index.js'
 import { mkdir, mkdtemp, readFile, writeFile, rename, rm, realpath, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 
 // All file paths belong to an explicit fresh temporary home. The persistence
 // observation is a seam; actual filesystem safety, native flock and I/O are not.
@@ -63,12 +66,28 @@ export async function fixture(existingHome, { start = false } = {}) {
   ctx.provide('sessionPersistence', { stat: observe, async list() {
     return (await Promise.all([...members].map(observe))).filter(Boolean)
   } })
+  const systemTrash = join(home, 'synthetic-system-trash')
+  await mkdir(systemTrash, { recursive: true })
+  // Install the mandatory seam synchronously inside construction, before
+  // Service.init can schedule startup maintenance. Never touches native trash.
+  class FixtureTrashService extends TrashService {
+    constructor(ctx) {
+      super(ctx)
+      this.purger.systemTrash = { async move(source, identity, recheck) {
+        if (!await isCanonicalPath(systemTrash)) throw new Error('Unsafe synthetic trash')
+        requireSameDevice(identity, await stat(systemTrash, { bigint: true }))
+        await recheck()
+        await hooks.move?.(source)
+        await rename(source, join(systemTrash, `${basename(source)}-${randomUUID()}`))
+      } }
+    }
+  }
   let trash
   if (start) {
     ctx.provide('typert', {})
-    await ctx.plugin(TrashService)
+    await ctx.plugin(FixtureTrashService)
     trash = ctx.get('trash')
-  } else trash = new TrashService(ctx)
+  } else trash = new FixtureTrashService(ctx)
   const report = trash.report.bind(trash)
   trash.report = async (sessionId, stage, result, error) => {
     await report(sessionId, stage, result, error)
@@ -76,7 +95,7 @@ export async function fixture(existingHome, { start = false } = {}) {
     await hooks.report?.(sessionId, stage, result)
   }
   trash.operationLog.fallback = line => { fallbacks.push(JSON.parse(line)); hooks.fallback?.(line) }
-  return { home, ctx, trash, medium, archived, members, workspaces, hooks, calls, logs, fallbacks, directory, log,
+  return { home, systemTrash, ctx, trash, medium, archived, members, workspaces, hooks, calls, logs, fallbacks, directory, log,
     cache: id => join(home, 'storages', 'session_projcache', 'sessions', `${id}.json`),
     async create(id = 'a') {
       await mkdir(directory(id), { recursive: true })

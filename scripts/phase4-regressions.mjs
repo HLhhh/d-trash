@@ -59,14 +59,10 @@ await test('physical deletion cleans all generations, ownership, archive, marker
     if (!record.purge || record.purge.deleting) return
     await assert.rejects(acquireWriteLease(f.directory(id)), /busy/)
   }
-  const remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
-  f.trash.purger.removeDirectory = async path => {
-    const moved = await lstat(path, { bigint: true })
-    assert.equal(moved.ino, before.ino); assert.equal(moved.dev, before.dev)
-    const lock = await acquireWriteLease(path) // Original lease was released before rm.
-    await lock.release()
+  f.hooks.move = async path => {
+    assert.equal(path, f.directory(id))
     assert.equal(f.medium.has(id), true); assert.equal(f.archived.has(id), true)
-    await remove(path)
+    await assert.rejects(acquireWriteLease(path), /busy/)
   }
   assert.equal(await f.trash.removeFromTrash(id), true)
   assert.equal(await exists(f.directory(id)), false)
@@ -74,10 +70,12 @@ await test('physical deletion cleans all generations, ownership, archive, marker
   assert.equal(f.medium.has(id), false); assert.equal(f.archived.has(id), false); assert.equal(f.members.has(id), false)
   assert.deepEqual(await f.trash.listTrash(), [])
   const stages = f.logs.map(row => row.stage)
-  assert.ok(stages.indexOf('locked') < stages.indexOf('renamed'))
-  assert.ok(stages.indexOf('renamed') < stages.indexOf('unlocked'))
-  assert.ok(stages.indexOf('unlocked') < stages.indexOf('logs-deleted'))
-  assert.ok(stages.indexOf('logs-deleted') < stages.indexOf('detach'))
+  assert.ok(stages.indexOf('locked') < stages.indexOf('moved-to-trash'))
+  assert.ok(stages.indexOf('moved-to-trash') < stages.indexOf('unlocked'))
+  assert.ok(stages.indexOf('unlocked') < stages.indexOf('detach'))
+  const [entry] = await readdir(f.systemTrash)
+  assert.equal((await lstat(join(f.systemTrash, entry), { bigint: true })).ino, before.ino)
+  assert.equal(await readFile(join(f.systemTrash, entry, 'session.v3.jsonl.zstd'), 'utf8'), 'SYNTHETIC OLDER GENERATION')
 })
 
 await test('stat locates and deletes without DSH_HOME, including sibling staging and projection cache', async f => {
@@ -87,9 +85,10 @@ await test('stat locates and deletes without DSH_HOME, including sibling staging
   f.hooks.put = (id, record) => { if (record.purge) captured = record.purge }
   assert.equal(await f.trash.removeFromTrash('a'), true)
   assert.equal(captured.source, f.directory('a'))
-  assert.equal(dirname(captured.target), join(f.home, 'sessions.trash-purge-staging'))
+  assert.equal(captured.target, undefined)
+  assert.equal(captured.moving, true)
   assert.equal(await exists(f.directory('a')), false)
-  assert.equal(await exists(captured.target), false)
+  assert.equal((await readdir(f.systemTrash)).length, 1)
   assert.equal(await exists(f.cache('a')), false)
   assert.equal(f.medium.has('a'), false)
   assert.ok(f.logs.some(row => row.stage === 'projection' && row.result === 'ok'))
@@ -133,7 +132,7 @@ await test('all owning workspaces are attempted after a detach failure and retry
   await assert.rejects(f.trash.removeFromTrash('a'), /\[detach\].*owning workspace denied/)
   assert.deepEqual(f.calls.filter(call => call.startsWith('detach:')), ['detach:0', 'detach:2', 'detach:3'])
   assert.equal(owners[0].has('a'), true); assert.equal(owners[1].has('a'), false)
-  assert.equal(f.medium.get('a').purge.logsDeleted, true)
+  assert.equal(f.medium.get('a').purge.moving, true)
   assert.equal(f.archived.has('a'), true)
   assert.equal(await exists(f.directory('a')), false)
   denied = false
@@ -153,19 +152,18 @@ await test('wrong DSH_HOME cannot redirect stat-derived deletion or receipt reco
   await writeFile(wrongCache, 'SYNTHETIC WRONG CACHE')
   process.env.DSH_HOME = wrong
   await f.create()
-  const remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
-  f.trash.purger.removeDirectory = async () => { throw new Error('injected rm failure') }
-  await assert.rejects(f.trash.removeFromTrash('a'), /\[delete-staged\].*injected rm failure/)
+  f.hooks.detach = () => { throw new Error('injected detach failure') }
+  await assert.rejects(f.trash.removeFromTrash('a'), /\[detach\].*injected detach failure/)
   const intent = f.medium.get('a').purge
   assert.equal(intent.source, f.directory('a'))
-  assert.equal(dirname(intent.target), join(f.home, 'sessions.trash-purge-staging'))
+  assert.equal(intent.target, undefined)
   assert.equal(await exists(f.directory('a')), false)
   // Once renamed, stat need not be available: recovery derives home from the
   // validated receipt, even with a valid but unrelated environment home.
   f.hooks.stat = () => { throw new Error('No stat after rename') }
-  f.trash.purger.removeDirectory = remove
+  delete f.hooks.detach
   assert.equal(await f.trash.removeFromTrash('a'), true)
-  assert.equal(await exists(intent.target), false)
+  assert.equal((await readdir(f.systemTrash)).length, 1)
   assert.equal(await exists(f.cache('a')), false)
   assert.equal(f.medium.has('a'), false)
   assert.equal(await readFile(join(wrongSource, 'session.v4.jsonl'), 'utf8'), 'SYNTHETIC WRONG HOME')
@@ -174,7 +172,7 @@ await test('wrong DSH_HOME cannot redirect stat-derived deletion or receipt reco
 })
 
 for (const mode of ['not-trash', 'unarchived', 'outside', 'extra-level', 'missing-level', 'wrong-id', 'no-location',
-  'symlink-home', 'symlink-root', 'symlink-slug', 'symlink-directory', 'symlink-log', 'symlink-lock', 'missing-lock', 'symlink-staging']) {
+  'symlink-home', 'symlink-root', 'symlink-slug', 'symlink-directory', 'symlink-log', 'symlink-lock', 'missing-lock', 'symlink-system-trash']) {
   await test(`reject ${mode} without deleting payloads`, async f => {
     await f.create()
     if (mode === 'not-trash') {
@@ -220,10 +218,11 @@ for (const mode of ['not-trash', 'unarchived', 'outside', 'extra-level', 'missin
       await symlink(join(f.home, 'outside-lock'), join(f.directory('a'), 'session.lock'))
     }
     if (mode === 'missing-lock') await rm(join(f.directory('a'), 'session.lock'))
-    if (mode === 'symlink-staging') {
-      await mkdir(join(f.home, 'outside')); await symlink(join(f.home, 'outside'), join(f.home, 'sessions.trash-purge-staging'))
+    if (mode === 'symlink-system-trash') {
+      await rm(f.systemTrash, { recursive: true })
+      await mkdir(join(f.home, 'outside')); await symlink(join(f.home, 'outside'), f.systemTrash)
     }
-    await assert.rejects(f.trash.removeFromTrash('a'), /Physical deletion/)
+    await assert.rejects(f.trash.removeFromTrash('a'), /Move to system trash/)
     assert.equal(await readFile(f.log('a'), 'utf8'), 'SYNTHETIC TEST LOG ONLY\n')
     assert.equal(f.medium.has('a'), mode !== 'not-trash')
     if (mode === 'outside') assert.equal(await readFile(join(f.home, 'outside', 'session.jsonl'), 'utf8'), 'OUTSIDE')
@@ -300,14 +299,15 @@ await test('SIGKILL immediately after real rename leaves recoverable staging and
   assert.equal(signal, 'SIGKILL', `unexpected ${code}: ${stderr}`)
   const audit = (await readFile(join(f.home, 'logs', 'trash.log'), 'utf8')).trimEnd().split('\n').map(JSON.parse)
   assert.ok(audit.some(row => row.action === 'removeFromTrash' && row.sessionId === 'a'
-    && row.stage === 'renamed' && row.result === 'ok'), 'rename event must survive process death')
+    && row.stage === 'moved-to-trash' && row.result === 'ok'), 'rename event must survive process death')
   assert.equal(await exists(f.directory('a')), false)
-  const staging = join(f.home, 'sessions.trash-purge-staging')
+  const staging = f.systemTrash
+  const [entry] = await readdir(staging)
   assert.equal((await readdir(staging)).length, 1)
   const diskMarkers = JSON.parse(await readFile(join(f.home, 'markers.json'), 'utf8'))
   assert.ok(diskMarkers.a.purge)
-  assert.equal(dirname(diskMarkers.a.purge.target), staging)
-  assert.equal(await readFile(join(diskMarkers.a.purge.target, 'session.v4.jsonl'), 'utf8'), 'SYNTHETIC TEST LOG ONLY\n')
+  assert.equal(diskMarkers.a.purge.target, undefined)
+  assert.equal(await readFile(join(staging, entry, 'session.v4.jsonl'), 'utf8'), 'SYNTHETIC TEST LOG ONLY\n')
   assert.deepEqual(await discoverSessionDirs(root), [f.directory('b')],
     'crash residue must be outside real JSONL discovery candidates, while other sessions stay visible')
   const restarted = await fixture(f.home)
@@ -315,8 +315,8 @@ await test('SIGKILL immediately after real rename leaves recoverable staging and
     assert.deepEqual(await discoverSessionDirs(root), [f.directory('b')], 'restart must not rediscover staged sessions')
     // Any purge invocation recovers previous staged payloads before its own gate.
     await assert.rejects(restarted.trash.removeFromTrash('unknown'), /not in trash/)
-    assert.deepEqual(await readdir(staging), [])
-    assert.equal(restarted.medium.get('a').purge.logsDeleted, true)
+    assert.deepEqual(await readdir(staging), [entry])
+    assert.equal(restarted.medium.get('a').purge.moving, true)
     const visible = (await restarted.trash.listTrash())[0][1]
     assert.equal(visible.purgePending, true)
     assert.equal(visible.purge, undefined, 'private filesystem paths must not cross Remote')
@@ -357,17 +357,20 @@ await test('discovery includes legacy dot projects but recovery never sweeps unc
   await unchanged(f)
 })
 
-await test('partial recursive deletion including lost lock is retryable', async f => {
+await test('legacy partial recursive deletion including lost lock moves remaining payload', async f => {
   await f.create()
-  const remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
-  f.trash.purger.removeDirectory = async path => {
-    await rm(join(path, 'session.lock'))
-    throw new Error('injected partial rm')
-  }
-  await assert.rejects(f.trash.removeFromTrash('a'), /\[delete-staged\].*partial rm/)
-  assert.equal(f.medium.get('a').purge.deleting, true)
-  f.trash.purger.removeDirectory = remove
+  const identity = await lstat(f.directory('a'), { bigint: true })
+  const staging = join(f.home, 'sessions.trash-purge-staging')
+  await mkdir(staging)
+  const target = join(staging, 'a-legacy')
+  await rename(f.directory('a'), target)
+  await rm(join(target, 'session.lock'))
+  const table = (await f.trash.domain()).table('trash')
+  await table.put('a', { ...table.get('a'), purge: { source: f.directory('a'), target,
+    dev: String(identity.dev), ino: String(identity.ino), deleting: true, logsDeleted: false } })
   assert.equal(await f.trash.removeFromTrash('a'), true)
+  assert.equal(await exists(target), false)
+  assert.equal((await readdir(f.systemTrash)).length, 1)
 })
 
 for (const stage of ['detach', 'unarchive', 'marker']) {
@@ -376,7 +379,7 @@ for (const stage of ['detach', 'unarchive', 'marker']) {
     f.hooks[stage] = () => { throw new Error(`injected ${stage}`) }
     await assert.rejects(f.trash.removeFromTrash('a'), new RegExp(`\\[${stage}\\]`))
     assert.equal(await exists(f.directory('a')), false)
-    assert.equal(f.medium.get('a').purge.logsDeleted, true)
+    assert.equal(f.medium.get('a').purge.moving, true)
     assert.equal((await f.trash.listTrash())[0][1].purgePending, true)
     await assert.rejects(f.trash.restoreSession('a'), /cannot be restored/)
     delete f.hooks[stage]
@@ -404,8 +407,8 @@ await test('empty reports partial success and retains busy marker for retry', as
 
 await test('queued restore/retrash/empty cannot overtake a paused rename/delete', async f => {
   await f.create()
-  const pause = barrier(), remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
-  f.trash.purger.removeDirectory = async path => { await pause.wait(); await remove(path) }
+  const pause = barrier(), remove = f.trash.purger.systemTrash.move.bind(f.trash.purger.systemTrash)
+  f.trash.purger.systemTrash.move = async (...args) => { await pause.wait(); await remove(...args) }
   const deletion = f.trash.removeFromTrash('a')
   await pause.arrived
   let restored = false, trashed = false

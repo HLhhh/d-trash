@@ -35,7 +35,7 @@ export default class TrashService extends TypertRemoteService {
     trashSession(sessionId: SessionId): Promise<void>;
     /** Remove the marker before unarchiving; restore it only if still archived. */
     restoreSession(sessionId: SessionId): Promise<void>;
-    /** Physical deletion, fenced against all other plugin operations and recovery. */
+    /** Move to system trash, fenced against all other plugin operations and recovery. */
     removeFromTrash(sessionId: SessionId): Promise<boolean>;
     /** Each item commits independently; failures retain markers and name their stages. */
     emptyTrash(): Promise<number>;
@@ -45,13 +45,13 @@ export default class TrashService extends TypertRemoteService {
      * list supplies candidate ids only; it never authorizes a guessed log path.
      */
     private logHome;
-    /** Any purge/empty first resumes durable intents, including rename-before-crash.
+    /** Any purge/empty first resumes durable intents, including move-before-crash.
      * deleteStaged validates the sibling staging path for every receipt; invalid
      * (including legacy in-root) targets keep their marker for diagnosis.
      */
     private recoverStaging;
     private purgeSession;
-    /** Both physical and absent-log cleanup reach here only after marker commit.
+    /** Both system-trash and absent-log cleanup reach here only after marker commit.
      * This is a notification, not a registry mutation or a deletion receipt.
      */
     private notifyRemoved;

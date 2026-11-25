@@ -1,7 +1,7 @@
 import type { BigIntStats } from 'node:fs'
-import { lstat, mkdir, rename, rm } from 'node:fs/promises'
+import { lstat, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { NativeSystemTrash, type SystemTrash } from './system-trash.js'
 import { acquireWriteLease, type WriteLease } from './write-lease.js'
 import { TrashErrorCode, SESSION_LOCK_BUSY_PREFIX } from './types.js'
 import { retrySharing, isCanonicalPath } from './fs-retry.js'
@@ -9,14 +9,23 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 
 /** Durable intent stays with the marker until all required record cleanup commits. */
-export interface PurgeIntent {
+export interface MoveIntent {
+  source: string
+  dev: string
+  ino: string
+  moving: true
+}
+/** Compatibility with pre-5.2 staging receipts. Never rm their payload. */
+export interface LegacyPurgeIntent {
   source: string
   target: string
   dev: string
   ino: string
   logsDeleted: boolean
   deleting: boolean
+  moving?: true
 }
+export type PurgeIntent = MoveIntent | LegacyPurgeIntent
 
 interface SessionRoots {
   home: string
@@ -38,7 +47,7 @@ interface StagedDeletion {
 export class PurgeError extends Error {
   constructor(readonly sessionId: SessionId, readonly stage: string, cause: unknown,
     readonly code?: TrashErrorCode) {
-    super(`${code === TrashErrorCode.SessionLockBusy ? SESSION_LOCK_BUSY_PREFIX : ''}Physical deletion [${stage}] (${sessionId}): ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+    super(`${code === TrashErrorCode.SessionLockBusy ? SESSION_LOCK_BUSY_PREFIX : ''}Move to system trash [${stage}] (${sessionId}): ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
   }
 }
 
@@ -48,7 +57,8 @@ const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.c
 /** JSONL maintenance. Never creates/truncates/unlinks a live POSIX lock file. */
 export class SessionPurger {
   constructor(private readonly observe: (id: SessionId) => Promise<SessionPersistenceSnapshot | undefined>,
-    private readonly report: (id: SessionId, stage: string) => Promise<void> = async () => {}) {}
+    private readonly report: (id: SessionId, stage: string) => Promise<void> = async () => {},
+    private readonly systemTrash: SystemTrash = new NativeSystemTrash()) {}
 
   /** Shared authority for operation logs; no environment-variable fallback. */
   async home(id: SessionId): Promise<string> {
@@ -97,7 +107,7 @@ export class SessionPurger {
     return { ...roots, source, log, identity }
   }
 
-  /** Write lease → recheck → durable intent → final gate → whole-directory rename → close. */
+  /** Write lease → recheck → durable intent → final gate → whole-directory system trash move → close. */
   async move(id: SessionId, gate: () => void, save: (intent: PurgeIntent) => Promise<void>): Promise<'moved' | 'logs-absent'> {
     let stage = 'gate'
     try {
@@ -123,33 +133,24 @@ export class SessionPurger {
         }
         gate()
         await this.report(id, 'recheck')
-        const { staging } = after
-        await mkdir(staging, { recursive: true, mode: 0o700 })
-        if (!await isCanonicalPath(staging) || !(await lstat(staging)).isDirectory()) throw new Error('Unsafe staging directory')
-        if ((await lstat(staging, { bigint: true })).dev !== before.identity.dev) throw new Error('Staging is on another filesystem')
-        const intent: PurgeIntent = { source: before.source,
-          target: join(staging, `${encodeURIComponent(id)}-${randomUUID()}`),
-          dev: String(before.identity.dev), ino: String(before.identity.ino), logsDeleted: false, deleting: false }
+        const intent: MoveIntent = { source: before.source, moving: true,
+          dev: String(before.identity.dev), ino: String(before.identity.ino) }
         stage = 'intent'
         await save(intent)
         await this.report(id, 'intent')
-        stage = 'recheck'
-        await retrySharing(async () => {
+        stage = 'moved-to-trash'
+        await retrySharing(() => this.systemTrash.move(before.source, before.identity, async () => {
           stage = 'recheck'
           const final = await this.locate(id)
           if (!final || final.source !== before.source || final.log !== before.log || !same(final.identity, before.identity)
-            || !await isCanonicalPath(staging)
-            || !same(before.identity, await lstat(before.source, { bigint: true }))) throw new Error('Directory identity changed before rename')
+            || !same(before.identity, await lstat(before.source, { bigint: true }))) throw new Error('Directory identity changed before move')
           await lease.verify()
-          stage = 'rename'
-          // Never replace a preexisting staging object, even on POSIX.
-          try { await lstat(intent.target); throw new Error('Staging target already exists') }
-          catch (error) { if (!missing(error)) throw error }
           gate()
-          stage = 'rename'
-          await this.renameDirectory(before.source, intent.target)
-        })
-        await this.report(id, 'renamed')
+          stage = 'moved-to-trash'
+        }))
+        stage = 'moved-to-trash'
+        await this.assertAbsent(before.source)
+        await this.report(id, 'moved-to-trash')
         return 'moved'
       } finally {
         // POSIX closes the inode moved by rename; Windows releases the original
@@ -169,61 +170,63 @@ export class SessionPurger {
     }
   }
 
-  /** Resume only marker intents targeting the sibling staging; never sweep unknown directories. */
+  private async assertAbsent(source: string): Promise<void> {
+    try { await lstat(source) } catch (error) { if (missing(error)) return; throw error }
+    throw new Error('Move did not remove the source directory')
+  }
+
+  /** New receipts use source presence only; the OS destination is not authority. */
   async deleteStaged(id: SessionId, intent: PurgeIntent, save: (intent: PurgeIntent) => Promise<void>): Promise<StagedDeletion> {
-    // stat may no longer find the log after rename/partial rm. The source was
-    // captured from stat before rename; validate it again without requiring it
-    // to exist, then bind the target to that exact home's sibling staging.
     const { home, staging } = await this.roots(intent.source)
-    if (!isAbsolute(intent.source) || intent.source !== resolve(intent.source) || intent.target !== resolve(intent.target)
-      || dirname(intent.target) !== staging || !basename(intent.target).startsWith(`${encodeURIComponent(id)}-`)) {
-      throw new Error('Unsafe persisted purge intent')
-    }
     const source = await lstat(intent.source, { bigint: true }).catch(error => { if (missing(error)) return undefined; throw error })
+    if (!('target' in intent)) {
+      if (intent.moving !== true) throw new Error('Unsafe persisted move intent')
+      if (source) {
+        if (!source.isDirectory() || !await isCanonicalPath(intent.source)
+          || String(source.dev) !== intent.dev || String(source.ino) !== intent.ino) throw new Error('Source was replaced during move')
+        return { status: 'unmoved', home }
+      }
+      return { status: 'deleted', home }
+    }
+    // Legacy receipts remain bounded to the original sibling staging path.
+    if (intent.target !== resolve(intent.target) || dirname(intent.target) !== staging
+      || !basename(intent.target).startsWith(`${encodeURIComponent(id)}-`)) throw new Error('Unsafe persisted purge intent')
     const target = await lstat(intent.target, { bigint: true }).catch(error => { if (missing(error)) return undefined; throw error })
     if (source) {
-      if (!await isCanonicalPath(intent.source) || target || String(source.dev) !== intent.dev || String(source.ino) !== intent.ino) throw new Error('Source was replaced during purge')
+      if (!source.isDirectory() || !await isCanonicalPath(intent.source) || target
+        || String(source.dev) !== intent.dev || String(source.ino) !== intent.ino) throw new Error('Source was replaced during purge')
       return { status: 'unmoved', home }
     }
     if (!target) {
-      // A recorded rename plus a completed rm can precede the domain commit.
-      // The intent remains the receipt for idempotent record cleanup.
-      if (!intent.deleting && !intent.logsDeleted) throw new Error('Purge intent has no rename/deletion evidence')
+      if (!intent.moving && !intent.deleting && !intent.logsDeleted) throw new Error('Purge intent has no move/deletion evidence')
       return { status: 'deleted', home }
     }
-    if (!target.isDirectory() || String(target.dev) !== intent.dev || String(target.ino) !== intent.ino
-      || !await isCanonicalPath(staging) || !await isCanonicalPath(intent.target)) throw new Error('Staged directory identity changed')
-    // Windows exclusion is path-named: protect the original writer name AND
-    // the staged name. POSIX rename carries the locked inode to the target.
+    const verify = async (): Promise<void> => {
+      if (!target.isDirectory() || String(target.dev) !== intent.dev || String(target.ino) !== intent.ino
+        || !await isCanonicalPath(staging) || !await isCanonicalPath(intent.target)
+        || !same(target, await lstat(intent.target, { bigint: true }))) throw new Error('Staged directory identity changed')
+      await this.assertAbsent(intent.source)
+    }
+    await verify()
     const sourceLease = process.platform === 'win32' ? await acquireWriteLease(intent.source) : undefined
     try {
       const lease = await acquireWriteLease(intent.target, intent.deleting)
       try {
         await lease.verify()
-        if (!await isCanonicalPath(intent.target)
-          || !same(target, await lstat(intent.target, { bigint: true }))) throw new Error('Staged directory identity changed')
-        const recreated = await lstat(intent.source).catch(error => { if (missing(error)) return undefined; throw error })
-        if (recreated) throw new Error('Source was replaced during purge')
-        intent.deleting = true
+        await verify()
+        intent.moving = true
         await save(intent)
-      } finally { await lease.release() }
+        await this.report(id, 'intent')
+        await retrySharing(() => this.systemTrash.move(intent.target, target, async () => {
+          await verify()
+          await lease.verify()
+        }))
+        await this.assertAbsent(intent.target)
+        await this.report(id, 'moved-to-trash')
+      } finally { await lease.release(); await this.report(id, 'unlocked') }
     } finally { await sourceLease?.release() }
-    // No open POSIX descriptor during rm. Each retry revalidates the receipt;
-    // a failed/partial rm keeps deleting=true for a later purge/empty call.
-    await retrySharing(async () => {
-      const current = await lstat(intent.target, { bigint: true })
-      if (!same(target, current) || !await isCanonicalPath(intent.target)
-        || !await isCanonicalPath(staging)) throw new Error('Staged directory identity changed')
-      await this.removeDirectory(intent.target)
-    })
-    await this.report(id, 'logs-deleted')
     return { status: 'deleted', home }
   }
-
-  /** Separate methods permit sharing-violation injection in isolated fixtures. */
-  async renameDirectory(source: string, target: string): Promise<void> { await rename(source, target) }
-
-  async removeDirectory(target: string): Promise<void> { await rm(target, { recursive: true, maxRetries: 4, retryDelay: 50 }) }
 
   async clearProjection(id: SessionId, home: string): Promise<void> {
     if (!isAbsolute(home) || home !== resolve(home) || !await isCanonicalPath(home)) throw new Error('Unsafe projection cache home')

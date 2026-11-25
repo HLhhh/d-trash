@@ -272,7 +272,7 @@ module.exports = async function review2fix(installed, emit, evidence) {
     })
   }
 
-  for (const action of ['Delete forever', 'Empty trash']) {
+  for (const action of ['Move to system trash', 'Empty trash']) {
     for (const slot of ['trash-menu', 'trash-action']) {
       await test(`M2 ${slot} delayed retrash response after ${action} cannot revive either panel`, async f => {
         await f.move('a')

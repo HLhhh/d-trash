@@ -1,10 +1,12 @@
 # d-trash（回收站）方案
 
+> 当前终态以第 5.2 期为准。第 4 期的 staging→rm / 不可恢复描述保留为历史，已被 5.2 系统回收站方案废弃；旧凭据仍兼容恢复。
+
 > **已交付**：第 0–4 期及评审修复、持久化操作日志（2026-11-22）；删除完成后的 Client 目录移除通知（2026-11-23，见末尾交付小节）。既有真机验收已通过：第 2 期入口和第 4 期两个会话的物理清理；详见本文验收记录。
 > 本次开源整理只改插件项目、运行隔离验证；没有安装/重载 bundle、修改核心/profile、启动 web server 或操作真实会话，不代表本轮完成真机复验。
-> 形态：DSH Host + Client bundle；包 `d-trash`，版本 `0.1.0`；插件 id / 服务 / Remote namespace / 面板 id 与 key 均为 `trash`。
+> 形态：DSH Host + Client bundle；包 `d-trash`，版本 `0.2.0`；插件 id / 服务 / Remote namespace / 面板 id 与 key 均为 `trash`。
 
-本文是唯一方案源。以下描述**当前累计实现**；各期标注职责来源，不要求最终代码保持当期的中间形态。历史逻辑删除方案已废弃，因为第 4 期明确升级为物理删除。
+本文是唯一方案源。以下描述**当前累计实现**；各期标注职责来源，不要求最终代码保持当期的中间形态。历史逻辑删除方案已废弃（第 4 期升级为物理删除）；第 4 期的物理删除终态又已由第 5.2 期系统回收站方案废弃。
 
 ## 背景、目标与已确认决策
 
@@ -552,16 +554,16 @@ Host 的两条成功分支共用 `purgeSession`：确认日志已删除或首次
 - 隔离验收：Client 回归覆盖短/长/`im-link:` 多冒号完整 id、缺失 API/异步拒绝/同步抛错/空错误信息、只读框聚焦全选、中英文即时切换、1.5 秒反馈、重复复制计时器替换、卸载清理及卸载后异步完成；`npm run build`、`npm test`、安装版 rc.5 的 `npm run test:discovery` 与 `npm pack --dry-run` 均通过（Windows 原生专属用例仍按平台跳过）。窄面板采用可换行/收缩布局，本轮不声称桌面 GUI 真机复验。
 - 风险：低。
 
-#### 5.2 删除语义改为「移入系统回收站」（中等，改核心语义）
+#### 5.2 删除语义改为「移入系统回收站」— 已交付（2026-11-25）
 
-- 终态从「rename 到暂存目录再 rm」改为「**move 到系统回收站**」：
-  - macOS：优先 Finder 的删除动作（保留「放回原处」元数据），失败回退到同卷 rename 进 `~/.Trash`；
-  - Windows：`SHFileOperationW` + `FOF_ALLOWUNDO`（经已有的 `koffi`），保留回收站来源信息。
-- 保留既有全部安全性：写租约、`stat` 身份校验、持久 intent、崩溃恢复、`lock-busy` 排队、失败可重试。
-- 审计阶段把 `renamed / logs-deleted / delete-staged` 替换为 `moved-to-trash`（旧阶段名在文档标注已废弃）。
-- 语义变化（需要更新 `AGENTS.md` 不变量）：**插件不再保证不可恢复**；恢复途径是系统回收站，插件无法感知用户何时清空系统回收站。
-- 验收：移动后 `sessions` 下目录消失、系统回收站里可见该目录；marker / 归档 / 工作区归属 / 投影缓存仍全部清理；失败保留凭据可重试；`emptyTrash` 逐条移动并汇总。
-- 风险：中。改核心语义 + 两平台实现差异 + 系统回收站命名冲突（同名自动改名为 `xxx 2`，intent 需记录「目录已移走」而非可预测目标路径）。
+- 目标/范围：单条操作与清空均移走整个会话日志目录，随后清理 marker / 归档 / 当前工作区归属 / 投影缓存；不再直接物理删除。系统层面可恢复，插件不保证不可恢复，也无法感知系统回收站何时清空。
+- macOS：直接调用同卷 `renamex_np(RENAME_EXCL)`，目录进入 `~/.Trash/d-trash-<uuid>`；原子拒绝重名覆盖。不调用 Finder/osascript/Apple Events 或权限申请接口，访问被拒绝即失败；不保证「放回原处」元数据。原「优先 Finder、失败回退」方案**已废弃**，因为可能触发授权弹窗。
+- Windows：经 koffi 调用 `SHFileOperationW(FO_DELETE)`，flags 为 `FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT`；使用双 NUL UTF-16 绝对路径，同时检查返回码与 aborted。仅接受有同卷可用回收站的固定本地盘；拒绝 UNC、挂载别名、通配符和超长路径。Shell 保留来源信息，恢复能力受系统回收站策略影响。
+- 保留写租约、stat/realpath/dev/ino、归档+marker 门禁、持久 intent、最终复核、Windows 有界 sharing 重试、lock-busy 下次启动排队。移动成功后验证源已不存在，释放租约再清记录；不 unlink 活锁文件。
+- 新 intent 只持久化 `moving: true / source / dev / ino`，不记录系统目标。恢复时源仍在须身份相同，撤销未迁移 intent 后重新过完整门禁；源不在继续清记录，不猜测系统目标。旧 target/deleting/logsDeleted 凭据仍校验同 home 的兄弟 staging 和身份；剩余目录只移入系统回收站，部分旧 rm 丢锁仅凭 deleting 兼容。陌生 staging 不扫不猜。
+- 审计用 `moved-to-trash` 替代 `renamed / logs-deleted / delete-staged`（旧阶段**已废弃**）；保留其它门禁、释放、记录清理、幽灵记录及汇总阶段。中英 UI 改为「移入系统回收站」，说明系统恢复与 macOS Put Back 边界。
+- 隔离验收：可注入接口将目录移入临时模拟回收站；覆盖成功/失败/移动前后中断/真实 SIGKILL/写锁排队/旧凭据/跨卷拒绝/不支持平台/清空汇总，保留原路径竞态与 UI 回归；macOS 原生 rename ABI 仅使用注入的临时用户目录，绝不写真实 `~/.Trash`。build/test/安装版 rc.5 discovery/pack dry-run 的本轮结果见本地 `CODEX_P5_2.md`；5.2 macOS/Windows 系统回收站 GUI 验收尚未进行，步骤见 DETAIL。
+- 明确不做：不 copy 跨卷、不提供物理删除旁路、不改 DSH 核心/profile、不安装 bundle、不碰真实会话，不动 5.1 / 5.3。
 
 #### 5.3 提炼功能（最复杂，需先调研 agent 调用能力）
 

@@ -102,7 +102,7 @@ await test('gate/stat and detach EBUSY failures do not create a queue; started d
   f.hooks.detach = () => { throw Object.assign(new Error('detach EBUSY'), { code: 'EBUSY' }) }
   await assert.rejects(f.trash.removeFromTrash('a'), /\[detach\]/)
   assert.equal(f.medium.get('a').deferredAt, undefined)
-  assert.equal(f.medium.get('a').purge.logsDeleted, true)
+  assert.equal(f.medium.get('a').purge.moving, true)
 })
 
 await test('manual retry removes deferredAt before durable intent; receipt failure retains recovery protocol', async f => {

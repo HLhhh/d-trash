@@ -100,12 +100,12 @@ await test('all successful purge stages persist outside the deleted source', asy
   await f.create()
   await f.trash.removeFromTrash('a')
   const log = (await rows(f)).filter(row => row.action === 'removeFromTrash')
-  assert.deepEqual(log.map(row => row.stage), ['gate', 'locked', 'recheck', 'intent', 'renamed',
-    'unlocked', 'logs-deleted', 'delete-staged', 'detach', 'unarchive', 'marker', 'removed', 'projection', 'complete'])
+  assert.deepEqual(log.map(row => row.stage), ['gate', 'locked', 'recheck', 'intent', 'moved-to-trash',
+    'unlocked', 'detach', 'unarchive', 'marker', 'removed', 'projection', 'complete'])
   assert.ok(log.every(row => row.sessionId === 'a' && row.result === 'ok' && row.reason === null))
 })
 
-for (const stage of ['gate', 'lock', 'recheck', 'intent', 'rename', 'delete-staged', 'detach', 'unarchive', 'marker', 'projection']) {
+for (const stage of ['gate', 'lock', 'recheck', 'intent', 'moved-to-trash', 'detach', 'unarchive', 'marker', 'projection']) {
   await test(`purge ${stage} failure/warning is persisted with its cause`, async f => {
     await f.create()
     let lock
@@ -118,13 +118,7 @@ for (const stage of ['gate', 'lock', 'recheck', 'intent', 'rename', 'delete-stag
       f.hooks.stat = () => { if (++reads === 2) throw new Error('injected recheck') }
     }
     if (stage === 'intent') f.hooks.put = (id, record) => { if (record.purge) throw new Error('injected intent') }
-    if (stage === 'rename') f.hooks.report = async (id, reported) => {
-      if (reported !== 'intent') return
-      const target = f.medium.get(id).purge.target
-      await mkdir(target)
-      await writeFile(join(target, 'sentinel'), 'SYNTHETIC rename conflict')
-    }
-    if (stage === 'delete-staged') f.trash.purger.removeDirectory = async () => { throw new Error('injected rm') }
+    if (stage === 'moved-to-trash') f.hooks.move = async () => { throw new Error('injected move') }
     if (stage === 'detach') f.hooks.detach = () => { throw new Error('injected detach') }
     if (stage === 'unarchive') f.hooks.unarchive = () => { throw new Error('injected unarchive') }
     if (stage === 'marker') f.hooks.marker = () => { throw new Error('injected marker') }
@@ -160,7 +154,7 @@ await test('busy delete and empty preserve stable wire marker, cause and data; n
     await assert.rejects(f.trash.removeFromTrash('a'), error => {
       assert.equal(error.code, TrashErrorCode.Deferred)
       assert.ok(error.message.startsWith(DEFERRED_PREFIX))
-      assert.match(error.message, /Physical deletion \[lock\] \(a\): Session lock is busy/)
+      assert.match(error.message, /Move to system trash \[lock\] \(a\): Session lock is busy/)
       assert.equal(error.cause.cause.cause.code, 'EBUSY')
       return true
     })
@@ -179,7 +173,7 @@ await test('busy delete and empty preserve stable wire marker, cause and data; n
     const log = await rows(f)
     assert.ok(!log.some(row => row.sessionId === 'a' && (row.stage === 'locked' || row.stage === 'unlocked')))
     assert.deepEqual(log.filter(row => row.action === 'emptyTrash' && row.sessionId === 'b').map(row => row.stage),
-      ['gate', 'locked', 'recheck', 'intent', 'renamed', 'unlocked', 'logs-deleted', 'delete-staged',
+      ['gate', 'locked', 'recheck', 'intent', 'moved-to-trash', 'unlocked',
         'detach', 'unarchive', 'marker', 'removed', 'projection', 'complete'])
   } finally { await lock.release() }
   assert.equal(await f.trash.removeFromTrash('a'), true)
@@ -205,18 +199,15 @@ await test('empty writes every item and partial-failure/success/zero summaries',
 
 await test('recovery failure and retry persist using the original receipt after source removal', async f => {
   await f.create()
-  const remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
-  f.trash.purger.removeDirectory = async () => { throw new Error('injected rm') }
-  await assert.rejects(f.trash.removeFromTrash('a'), /injected rm/)
-  // New Host, no cached home; stat/list can no longer locate this session.
+  f.hooks.detach = () => { throw new Error('injected cleanup') }
+  await assert.rejects(f.trash.removeFromTrash('a'), /injected cleanup/)
   const restarted = await fixture(f.home)
   try {
     restarted.hooks.stat = () => { throw new Error('source is gone') }
-    restarted.trash.purger.removeDirectory = async () => { throw new Error('recovery denied') }
-    await assert.rejects(restarted.trash.removeFromTrash('a'), /recovery denied/)
-    assert.ok((await rows(f)).some(row => row.action === 'recovery' && row.result === 'failed'
-      && /recovery denied/.test(row.reason)))
-    restarted.trash.purger.removeDirectory = remove
+    restarted.hooks.detach = () => { throw new Error('recovery cleanup denied') }
+    await assert.rejects(restarted.trash.removeFromTrash('a'), /recovery cleanup denied/)
+    assert.equal(restarted.medium.get('a').purge.moving, true)
+    delete restarted.hooks.detach
     await restarted.trash.removeFromTrash('a')
     assert.ok((await rows(f)).some(row => row.action === 'recovery' && row.result === 'deleted'))
     assert.equal(restarted.fallbacks.length, 0)
@@ -230,10 +221,10 @@ await test('write failure and a throwing fallback never change any Host operatio
   f.hooks.fallback = () => { throw new Error('fallback logger failed too') }
   await f.trash.restoreSession('a')
   await f.trash.trashSession('a')
-  const remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
-  f.trash.purger.removeDirectory = async () => { throw new Error('primary rm failure') }
+  const remove = f.trash.purger.systemTrash.move.bind(f.trash.purger.systemTrash)
+  f.trash.purger.systemTrash.move = async () => { throw new Error('primary rm failure') }
   await assert.rejects(f.trash.removeFromTrash('a'), /primary rm failure/)
-  f.trash.purger.removeDirectory = remove
+  f.trash.purger.systemTrash.move = remove
   assert.equal(await f.trash.emptyTrash(), 1)
   for (const action of ['trashSession', 'restoreSession', 'removeFromTrash', 'emptyTrash', 'recovery']) {
     assert.ok(f.fallbacks.some(row => row.action === action && typeof row.logError === 'string'), action)

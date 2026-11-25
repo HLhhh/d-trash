@@ -35,8 +35,8 @@ await test('absent directory cleans ghost ownership, archive, marker and cache i
   await rm(f.directory('a'), { recursive: true })
   f.calls.length = 0; f.logs.length = 0
   f.trash.purger.deleteStaged = async () => assert.fail('ghost must not touch staging')
-  f.trash.purger.renameDirectory = async () => assert.fail('ghost must not rename')
-  f.trash.purger.removeDirectory = async () => assert.fail('ghost must not rm logs')
+  f.trash.purger.systemTrash.move = async () => assert.fail('ghost must not rename')
+  f.trash.purger.systemTrash.move = async () => assert.fail('ghost must not rm logs')
   assert.equal(await f.trash.removeFromTrash('a'), true)
   await clean(f)
   assert.deepEqual(f.calls, ['detach:0', 'unarchive'])
@@ -57,7 +57,7 @@ await test('stale Client re-trash after a successful physical delete can be dele
   await clean(f)
   assert.deepEqual(f.calls, ['unarchive'])
   assert.ok(f.logs.some(row => row.stage === 'logs-absent'))
-  assert.equal(f.logs.some(row => row.stage === 'delete-staged' || row.stage === 'detach'), false)
+  assert.equal(f.logs.some(row => row.stage === 'moved-to-trash' || row.stage === 'detach'), false)
 })
 
 await test('empty counts ghosts as successful record cleanup and preserves other sessions', async f => {
@@ -132,14 +132,12 @@ for (const point of ['locked', 'intent']) {
 
 await test('existing staged receipt resumes even when stat throws', async f => {
   await f.create()
-  const remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
-  f.trash.purger.removeDirectory = async () => { throw new Error('injected rm failure') }
-  await assert.rejects(f.trash.removeFromTrash('a'), /\[delete-staged\].*rm failure/)
-  const { target } = f.medium.get('a').purge
-  f.hooks.stat = () => { throw new Error('stat unavailable after rename') }
-  f.trash.purger.removeDirectory = remove
+  f.hooks.detach = () => { throw new Error('injected cleanup failure') }
+  await assert.rejects(f.trash.removeFromTrash('a'), /\[detach\]/)
+  f.hooks.stat = () => { throw new Error('stat unavailable after move') }
+  delete f.hooks.detach
   assert.equal(await f.trash.removeFromTrash('a'), true)
-  await clean(f); await absent(target)
+  await clean(f)
   assert.ok(f.logs.some(row => row.stage === 'recovery' && row.result === 'deleted'))
   assert.equal(f.logs.some(row => row.stage === 'logs-absent'), false)
 })

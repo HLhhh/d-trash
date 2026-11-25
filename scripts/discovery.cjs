@@ -327,6 +327,7 @@ async function main() {
   await require('./review2fix-regressions.cjs')(installed, emit, evidence)
   await require('./reappear-evidence.cjs')(installed, emit)
   await import('./platform-regressions.mjs')
+  await import('./system-trash-regressions.mjs')
   await import('./phase4-regressions.mjs')
   await import('./ghost-regressions.mjs')
   await import('./operation-log-regressions.mjs')

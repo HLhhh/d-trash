@@ -49,8 +49,11 @@ const trashDomain = defineDomain({
             workspaceId: z.string().optional(),
             titleSnapshot: z.string().optional(),
             deferredAt: z.number().optional(),
-            purge: z.object({ source: z.string(), target: z.string(), dev: z.string(), ino: z.string(),
-                logsDeleted: z.boolean(), deleting: z.boolean() }).optional(),
+            purge: z.union([
+                z.object({ source: z.string(), dev: z.string(), ino: z.string(), moving: z.literal(true) }).strict(),
+                z.object({ source: z.string(), target: z.string(), dev: z.string(), ino: z.string(),
+                    logsDeleted: z.boolean(), deleting: z.boolean(), moving: z.literal(true).optional() }).strict(),
+            ]).optional(),
         })),
     },
 });
@@ -174,7 +177,7 @@ let TrashService = (() => {
                 const table = (await this.domain()).table('trash');
                 const registry = this.workspaceRegistry();
                 if (table.get(sessionId)?.purge)
-                    throw new PurgeError(sessionId, 'gate', 'Deletion is pending; retry physical deletion');
+                    throw new PurgeError(sessionId, 'gate', 'Deletion is pending; retry moving to system trash');
                 const wasArchived = registry.archivedSessionIds.includes(sessionId);
                 // A rejection can follow the archive commit (e.g. stopActivity). Leave
                 // that archive intact and propagate the failure without adding a marker.
@@ -227,7 +230,7 @@ let TrashService = (() => {
                 }
             }));
         }
-        /** Physical deletion, fenced against all other plugin operations and recovery. */
+        /** Move to system trash, fenced against all other plugin operations and recovery. */
         async removeFromTrash(sessionId) {
             return this.exclusive(() => this.operation('removeFromTrash', sessionId, async () => {
                 await this.recoverStaging();
@@ -258,10 +261,10 @@ let TrashService = (() => {
                     }
                 }
                 if (failures.length) {
-                    throw new AggregateError(failures, `Physical deletion: ${deleted} deleted, ${failed} failed, ${deferred} queued: ${failures.map(String).join('; ')}`);
+                    throw new AggregateError(failures, `Move to system trash: ${deleted} deleted, ${failed} failed, ${deferred} queued: ${failures.map(String).join('; ')}`);
                 }
                 if (deferred)
-                    throw new DeferredError(`Physical deletion: ${deleted} deleted, 0 failed, ${deferred} queued`, undefined);
+                    throw new DeferredError(`Move to system trash: ${deleted} deleted, 0 failed, ${deferred} queued`, undefined);
                 return deleted;
             }, 'summary', () => `${deleted} deleted, ${failed} failed, ${deferred} queued`));
         }
@@ -319,7 +322,7 @@ let TrashService = (() => {
                 }
             throw new Error('No reliable stat-derived home for operation log');
         }
-        /** Any purge/empty first resumes durable intents, including rename-before-crash.
+        /** Any purge/empty first resumes durable intents, including move-before-crash.
          * deleteStaged validates the sibling staging path for every receipt; invalid
          * (including legacy in-root) targets keep their marker for diagnosis.
          */
@@ -336,9 +339,6 @@ let TrashService = (() => {
                         if (result.status === 'unmoved') {
                             const { purge: _, ...original } = record;
                             await table.put(id, original);
-                        }
-                        else {
-                            await table.put(id, { ...record, purge: { ...intent, logsDeleted: true } });
                         }
                         await this.report(id, 'recovery', result.status);
                     }
@@ -374,15 +374,12 @@ let TrashService = (() => {
                     record = table.get(sessionId);
                 }
                 if (record.purge) {
-                    stage = 'delete-staged';
+                    stage = 'moved-to-trash';
                     const intent = { ...record.purge };
                     const result = await this.purger.deleteStaged(sessionId, intent, purge => table.put(sessionId, { ...record, purge: { ...purge } }));
                     if (result.status !== 'deleted')
-                        throw new Error('Rename did not commit; retry deletion');
+                        throw new Error('Move did not commit; retry moving to system trash');
                     home = result.home;
-                    await this.report(sessionId, stage, 'ok');
-                    record = { ...record, purge: { ...intent, logsDeleted: true } };
-                    await table.put(sessionId, record);
                 }
                 stage = 'detach';
                 const failures = [];
@@ -436,7 +433,7 @@ let TrashService = (() => {
                 throw failure;
             }
         }
-        /** Both physical and absent-log cleanup reach here only after marker commit.
+        /** Both system-trash and absent-log cleanup reach here only after marker commit.
          * This is a notification, not a registry mutation or a deletion receipt.
          */
         async notifyRemoved(sessionId) {

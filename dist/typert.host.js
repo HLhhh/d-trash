@@ -47,7 +47,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_emptyTrash_result$schema,
         jsonSchema: {"type":"number"},
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":201,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":204,"column":9},
     },
     'trash/listTrash': {
       service: 'trash',
@@ -61,11 +61,11 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_listTrash_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported selected tuple type',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":384,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":382,"column":9},
     },
     'trash/removeFromTrash': {
       service: 'trash',
-      description: 'Physical deletion, fenced against all other plugin operations and recovery.',
+      description: 'Move to system trash, fenced against all other plugin operations and recovery.',
       invocation: { kind: 'direct' },
       parameters: [
         {
@@ -91,7 +91,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_removeFromTrash_result$schema,
         jsonSchema: {"type":"boolean"},
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":192,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":195,"column":9},
     },
     'trash/restoreSession': {
       service: 'trash',
@@ -121,7 +121,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_restoreSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":165,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":168,"column":9},
     },
     'trash/trashSession': {
       service: 'trash',
@@ -151,7 +151,7 @@ const $remote = createTypertRemoteInfo({
         create: d_trash_trash_trashSession_result$schema,
         jsonSchemaError: 'typert tool schema: unsupported void value',
       },
-      sourceLocation: {"file":"packages/trash/src/index.ts","line":133,"column":9},
+      sourceLocation: {"file":"packages/trash/src/index.ts","line":136,"column":9},
     },
   },
 }, z)
@@ -197,8 +197,8 @@ export const TYPERT = {
             "kind": "method",
             "name": "removeFromTrash",
             "signature": "@Remote('removeFromTrash') async removeFromTrash(sessionId: SessionId): Promise<boolean>",
-            "summary": "Physical deletion, fenced against all other plugin operations and recovery.",
-            "jsDoc": "/** Physical deletion, fenced against all other plugin operations and recovery. */"
+            "summary": "Move to system trash, fenced against all other plugin operations and recovery.",
+            "jsDoc": "/** Move to system trash, fenced against all other plugin operations and recovery. */"
           },
           {
             "kind": "method",

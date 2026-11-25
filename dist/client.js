@@ -13,13 +13,13 @@
   var en_default = {
     meta: {
       title: "d-trash",
-      description: "Manage session trash and permanently delete local session logs.",
+      description: "Manage session trash and move local session logs to system trash.",
       detail: "docs/DETAIL.md"
     },
     trash: {
       moveToTrash: "Move to trash",
       restore: "Restore",
-      deleteForever: "Delete forever",
+      deleteForever: "Move to system trash",
       emptyTrash: "Empty trash",
       moving: "Moving to trash\u2026",
       moveFailed: "Could not move to trash: {reason}",
@@ -28,22 +28,22 @@
       loading: "Loading trash\u2026",
       refresh: "Refresh",
       cancel: "Cancel",
-      confirmDelete: "Physically delete \u201C{title}\u201D? This cannot be undone.",
-      confirmEmpty: "Physically delete all sessions in trash? This cannot be undone.",
+      confirmDelete: "Move \u201C{title}\u201D to system trash? It can be recovered at the system level.",
+      confirmEmpty: "Move all sessions in trash to system trash? They can be recovered at the system level.",
       loadFailed: "Could not load trash: {reason}",
       restoreFailed: "Could not restore session: {reason}",
-      deleteFailed: "Could not physically delete session: {reason}",
-      emptyFailed: "Could not empty trash: {reason}",
-      sessionLockBusy: "This session is currently open or in use. Switch to another session (or restart DSH), then retry Delete forever. A loaded session may remain locked after switching; restart DSH if it still fails.",
+      deleteFailed: "Could not move session to system trash: {reason}",
+      emptyFailed: "Could not move all sessions to system trash: {reason}",
+      sessionLockBusy: "This session is open or in use. Switch to another session or restart DSH, then retry Move to system trash. Loaded sessions may remain locked after switching.",
       working: "Working\u2026",
       trashedAt: "Moved to trash: {time}",
       workspace: "Workspace: {workspace}",
       unknownTime: "Unknown time",
       noWorkspace: "No workspace",
-      physicalDeletion: "Physical deletion permanently removes local session logs and cannot be undone.",
-      purgePending: "Deletion is unfinished. Retry physical deletion to complete cleanup.",
-      deferred: "Pending deletion (automatically completes after restarting DSH)",
-      deferredNotice: "Queued for deletion. Restart DSH to complete it; Restore cancels the queue. {reason}",
+      physicalDeletion: "Moves local session logs to system trash for system-level recovery. Put Back metadata is not guaranteed on macOS.",
+      purgePending: "Move or cleanup is unfinished. Retry Move to system trash to complete cleanup.",
+      deferred: "Pending move to system trash (automatically retries after restarting DSH)",
+      deferredNotice: "Queued for moving to system trash. Restart DSH to retry; Restore cancels the queue. {reason}",
       sessionId: "Session ID",
       copyId: "Copy ID",
       copied: "Copied",
@@ -58,13 +58,13 @@
   var zh_default = {
     meta: {
       title: "d-trash",
-      description: "\u7BA1\u7406\u4F1A\u8BDD\u56DE\u6536\u7AD9\uFF0C\u7269\u7406\u5220\u9664\u672C\u5730\u4F1A\u8BDD\u65E5\u5FD7\u3002",
+      description: "\u7BA1\u7406\u4F1A\u8BDD\u56DE\u6536\u7AD9\uFF0C\u5C06\u672C\u5730\u4F1A\u8BDD\u65E5\u5FD7\u79FB\u5165\u7CFB\u7EDF\u56DE\u6536\u7AD9\u3002",
       detail: "docs/DETAIL.md"
     },
     trash: {
       moveToTrash: "\u6536\u8FDB\u56DE\u6536\u7AD9",
       restore: "\u6062\u590D",
-      deleteForever: "\u5F7B\u5E95\u5220\u9664",
+      deleteForever: "\u79FB\u5165\u7CFB\u7EDF\u56DE\u6536\u7AD9",
       emptyTrash: "\u6E05\u7A7A\u56DE\u6536\u7AD9",
       moving: "\u6B63\u5728\u6536\u8FDB\u56DE\u6536\u7AD9\u2026",
       moveFailed: "\u6536\u8FDB\u56DE\u6536\u7AD9\u5931\u8D25\uFF1A{reason}",
@@ -73,22 +73,22 @@
       loading: "\u6B63\u5728\u52A0\u8F7D\u56DE\u6536\u7AD9\u2026",
       refresh: "\u5237\u65B0",
       cancel: "\u53D6\u6D88",
-      confirmDelete: "\u786E\u8BA4\u7269\u7406\u5220\u9664\u201C{title}\u201D\uFF1F\u5220\u9664\u540E\u4E0D\u53EF\u6062\u590D\u3002",
-      confirmEmpty: "\u786E\u8BA4\u7269\u7406\u5220\u9664\u56DE\u6536\u7AD9\u4E2D\u7684\u6240\u6709\u4F1A\u8BDD\uFF1F\u5220\u9664\u540E\u4E0D\u53EF\u6062\u590D\u3002",
+      confirmDelete: "\u786E\u8BA4\u5C06\u201C{title}\u201D\u79FB\u5165\u7CFB\u7EDF\u5E9F\u7EB8\u7BD3\uFF08\u56DE\u6536\u7AD9\uFF09\uFF1F\u53EF\u5728\u7CFB\u7EDF\u5C42\u9762\u6062\u590D\u3002",
+      confirmEmpty: "\u786E\u8BA4\u5C06\u56DE\u6536\u7AD9\u4E2D\u7684\u6240\u6709\u4F1A\u8BDD\u79FB\u5165\u7CFB\u7EDF\u5E9F\u7EB8\u7BD3\uFF08\u56DE\u6536\u7AD9\uFF09\uFF1F\u53EF\u5728\u7CFB\u7EDF\u5C42\u9762\u6062\u590D\u3002",
       loadFailed: "\u52A0\u8F7D\u56DE\u6536\u7AD9\u5931\u8D25\uFF1A{reason}",
       restoreFailed: "\u6062\u590D\u4F1A\u8BDD\u5931\u8D25\uFF1A{reason}",
-      deleteFailed: "\u7269\u7406\u5220\u9664\u4F1A\u8BDD\u5931\u8D25\uFF1A{reason}",
-      emptyFailed: "\u6E05\u7A7A\u56DE\u6536\u7AD9\u5931\u8D25\uFF1A{reason}",
-      sessionLockBusy: "\u8BE5\u4F1A\u8BDD\u5F53\u524D\u5DF2\u6253\u5F00\u6216\u6B63\u5728\u4F7F\u7528\uFF0C\u8BF7\u5148\u5207\u6362\u5230\u5176\u5B83\u4F1A\u8BDD\uFF08\u6216\u91CD\u542F DSH\uFF09\u540E\u518D\u5F7B\u5E95\u5220\u9664\u3002\u5DF2\u52A0\u8F7D\u4F1A\u8BDD\u5207\u6362\u540E\u53EF\u80FD\u4ECD\u6301\u9501\uFF0C\u82E5\u4ECD\u5931\u8D25\u8BF7\u91CD\u542F DSH\u3002",
+      deleteFailed: "\u79FB\u5165\u7CFB\u7EDF\u56DE\u6536\u7AD9\u5931\u8D25\uFF1A{reason}",
+      emptyFailed: "\u6279\u91CF\u79FB\u5165\u7CFB\u7EDF\u56DE\u6536\u7AD9\u5931\u8D25\uFF1A{reason}",
+      sessionLockBusy: "\u8BE5\u4F1A\u8BDD\u5F53\u524D\u5DF2\u6253\u5F00\u6216\u6B63\u5728\u4F7F\u7528\uFF0C\u8BF7\u5148\u5207\u6362\u5230\u5176\u5B83\u4F1A\u8BDD\u6216\u91CD\u542F DSH\uFF0C\u518D\u91CD\u8BD5\u79FB\u5165\u7CFB\u7EDF\u56DE\u6536\u7AD9\u3002\u5DF2\u52A0\u8F7D\u4F1A\u8BDD\u5207\u6362\u540E\u53EF\u80FD\u4ECD\u6301\u9501\u3002",
       working: "\u6B63\u5728\u5904\u7406\u2026",
       trashedAt: "\u6536\u8FDB\u65F6\u95F4\uFF1A{time}",
       workspace: "\u6240\u5C5E\u5DE5\u4F5C\u533A\uFF1A{workspace}",
       unknownTime: "\u65F6\u95F4\u672A\u77E5",
       noWorkspace: "\u65E0\u6240\u5C5E\u5DE5\u4F5C\u533A",
-      physicalDeletion: "\u7269\u7406\u5220\u9664\u5C06\u6C38\u4E45\u79FB\u9664\u672C\u5730\u4F1A\u8BDD\u65E5\u5FD7\uFF0C\u4E0D\u53EF\u6062\u590D\u3002",
-      purgePending: "\u5220\u9664\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u7269\u7406\u5220\u9664\u4EE5\u5B8C\u6210\u6E05\u7406\u3002",
-      deferred: "\u5F85\u5220\u9664\uFF08\u91CD\u542F DSH \u540E\u81EA\u52A8\u5B8C\u6210\uFF09",
-      deferredNotice: "\u5DF2\u6392\u961F\u3002\u91CD\u542F DSH \u540E\u81EA\u52A8\u5B8C\u6210\uFF1B\u6062\u590D\u53EF\u53D6\u6D88\u6392\u961F\u3002{reason}",
+      physicalDeletion: "\u672C\u5730\u4F1A\u8BDD\u65E5\u5FD7\u5C06\u79FB\u5165\u7CFB\u7EDF\u5E9F\u7EB8\u7BD3\uFF08\u56DE\u6536\u7AD9\uFF09\uFF0C\u53EF\u5728\u7CFB\u7EDF\u5C42\u9762\u6062\u590D\uFF1BmacOS \u4E0D\u4FDD\u8BC1\u201C\u653E\u56DE\u539F\u5904\u201D\u5143\u6570\u636E\u3002",
+      purgePending: "\u79FB\u52A8\u6216\u6E05\u7406\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u79FB\u5165\u7CFB\u7EDF\u56DE\u6536\u7AD9\u4EE5\u5B8C\u6210\u6E05\u7406\u3002",
+      deferred: "\u5F85\u79FB\u5165\u7CFB\u7EDF\u56DE\u6536\u7AD9\uFF08\u91CD\u542F DSH \u540E\u81EA\u52A8\u91CD\u8BD5\uFF09",
+      deferredNotice: "\u5DF2\u6392\u961F\u79FB\u5165\u7CFB\u7EDF\u56DE\u6536\u7AD9\uFF0C\u91CD\u542F DSH \u540E\u91CD\u8BD5\uFF1B\u6062\u590D\u53EF\u53D6\u6D88\u6392\u961F\u3002{reason}",
       sessionId: "\u4F1A\u8BDD ID",
       copyId: "\u590D\u5236 ID",
       copied: "\u5DF2\u590D\u5236",
@@ -20808,7 +20808,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_emptyTrash_result$schema,
           jsonSchema: { "type": "number" }
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 201, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 204, "column": 9 }
       },
       "trash/listTrash": {
         service: "trash",
@@ -20821,11 +20821,11 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_listTrash_result$schema,
           jsonSchemaError: "typert tool schema: unsupported selected tuple type"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 384, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 382, "column": 9 }
       },
       "trash/removeFromTrash": {
         service: "trash",
-        description: "Physical deletion, fenced against all other plugin operations and recovery.",
+        description: "Move to system trash, fenced against all other plugin operations and recovery.",
         invocation: { kind: "direct" },
         parameters: [
           {
@@ -20851,7 +20851,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_removeFromTrash_result$schema,
           jsonSchema: { "type": "boolean" }
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 192, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 195, "column": 9 }
       },
       "trash/restoreSession": {
         service: "trash",
@@ -20881,7 +20881,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_restoreSession_result$schema,
           jsonSchemaError: "typert tool schema: unsupported void value"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 165, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 168, "column": 9 }
       },
       "trash/trashSession": {
         service: "trash",
@@ -20911,7 +20911,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
           create: d_trash_trash_trashSession_result$schema,
           jsonSchemaError: "typert tool schema: unsupported void value"
         },
-        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 133, "column": 9 }
+        sourceLocation: { "file": "packages/trash/src/index.ts", "line": 136, "column": 9 }
       }
     }
   }, external_exports);

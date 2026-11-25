@@ -4,7 +4,7 @@
 
 GitHub 主仓 · [Gitee 镜像](https://gitee.com/huang-lin-java/d-trash)
 
-为 DeepSeek Harness（DSH）提供独立的会话回收站，支持恢复与永久删除本地会话日志。
+为 DeepSeek Harness（DSH）提供独立的会话回收站，支持恢复与将本地会话日志移入系统回收站。
 
 ## 解决什么问题
 
@@ -14,9 +14,9 @@ GitHub 主仓 · [Gitee 镜像](https://gitee.com/huang-lin-java/d-trash)
 
 - **收进回收站**：从会话右键菜单或悬停按钮收进，保留日志和工作区成员位置。
 - **恢复**：取消归档，保留当前工作区位置。
-- **彻底删除**：确认后物理删除本地会话日志并清理必要记录，不可恢复。
-- **占用时排队**：重启 DSH 后自动重试删除；恢复可取消排队。
-- **清空回收站**：跨工作区逐条删除，汇总区分已删除、已排队与失败数。
+- **移入系统回收站**：确认后将整个本地会话日志目录移入 macOS 废纸篓 / Windows 回收站，再清理必要记录；可在系统层面恢复。
+- **占用时排队**：重启 DSH 后自动重试移入系统回收站；恢复可取消排队。
+- **清空回收站**：跨工作区逐条移入系统回收站，汇总区分已移入、已排队与失败数。
 - **审计日志**：以本地 JSONL 记录操作、阶段和失败原因。
 
 全局面板按收进时间倒序显示标题与当前所属工作区，界面支持中英文。
@@ -49,21 +49,23 @@ Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为�
 | 会话行悬停 → 垃圾桶按钮 | 收进回收站 |
 | 左侧栏 → 回收站 | 打开全局回收站面板 |
 | 面板 → 恢复 | 返回普通会话列表 |
-| 面板 → 彻底删除 | 确认后永久删除该会话的本地日志 |
-| 面板 → 清空回收站 | 确认后永久删除全部回收站会话 |
+| 面板 → 移入系统回收站 | 确认后将该会话的本地日志移入系统回收站 |
+| 面板 → 清空回收站 | 确认后将全部回收站会话移入系统回收站 |
 | 面板 → 刷新 | 重读列表和工作区投影 |
 
-删除使用内联确认，可按取消或 Escape 退出。排队条目显示「待删除（重启 DSH 后自动完成）」；点恢复只取消排队，仍保留在回收站，日志、归档和工作区归属不变，再次恢复则按普通流程取消归档。已开始物理删除、带 purge 凭据的条目禁用恢复，应重试删除以完成清理。
+删除使用内联确认，可按取消或 Escape 退出。排队条目显示「待移入系统回收站（重启 DSH 后自动重试）」；点恢复只取消排队，仍保留在回收站，日志、归档和工作区归属不变，再次恢复则按普通流程取消归档。已开始移入系统回收站、带 purge 凭据的条目禁用恢复，应重试移入系统回收站以完成清理。
 
 ## 工作原理
 
 回收站状态只由 Host 服务写入。普通可观测回收站为 **`marker ∩ archived`**：原生归档不会创建 marker；原生取消归档后会话立即退出交集，Host 下次读取时清理滞留 marker。原生归档、置顶行为不变。
 
-物理删除先校验 JSONL 路径和文件系统身份。Host 使用与 backend 兼容的写租约：POSIX 对既有 `session.lock` 使用官方 `flock`，Windows 经 Koffi 获取同名内核信号量，持久化删除 intent，复核身份，将整个会话目录 rename 到 `sessions` 旁的同设备暂存目录，关闭锁后再删除暂存。之后清理工作区成员、归档和 marker，并尝试清理投影缓存。失败保留持久凭据，下次删除或清空时重试；待清理诊断独立于普通回收站交集展示。
+移入系统回收站先校验 JSONL 路径和文件系统身份。Host 使用与 backend 兼容的写租约：POSIX 对既有 `session.lock` 使用官方 `flock`，Windows 经 Koffi 获取同名内核信号量；持久化只含源路径的移动 intent，复核身份与归档+marker 门禁，将整个目录移入同卷系统回收站，确认源不在后释放租约。之后清理工作区成员、归档和 marker，并尝试清理投影缓存。macOS 排他 rename 到 `~/.Trash/d-trash-<uuid>`，不用 Finder/osascript 或权限申请接口；Windows 使用带 `FOF_ALLOWUNDO` 且抑制 UI 的 `SHFileOperationW`。其它平台、跨卷、系统回收站不可用时明确拒绝，不 copy、不物理删除兜底。
+
+失败保留持久凭据。恢复检查源：仍在且身份匹配则撤销未迁移 intent，重新走完整门禁；源不在则继续清记录，不猜系统目标路径。旧 staging 凭据仍可恢复，校验后将剩余目录移入系统回收站，不递归删除。待清理诊断独立于普通回收站交集展示。
 
 客户端陈旧列表可能把已删除的会话再次收进回收站。首次 `stat` 明确返回 `undefined` 时，只有 marker 存在且仍归档才允许清理幽灵记录：跳过日志删除，依次 detach 当前所属工作区、取消归档、删 marker、尝试清投影；删除成功返回 `true`，清空计为成功，并记录 `logs-absent` 阶段及原因。`stat` 抛错（含 I/O 故障）、header.id 不符、非 JSONL、相对路径或缺失 location 仍拒绝清理。已有 purge 凭据始终按原协议校验、恢复。投影清理复用已校验的 stat/source home 或其它可靠会话的 home；无可靠 home 时只记 warning，审计日志降级 Host logger，不猜路径。
 
-物理删除或幽灵清理成功、删 marker 后，Host 会 best-effort 发送公开 `api-session/removed(sessionId)`。已实证安装版 rc.5 的 Host transport 会下发到真实 Client catalog，移除否则会在「未分组」重新显示的陈旧行。失败/排队不发通知；通知异常仅记 `removed/warning`，不改变删除成功结果。
+移入系统回收站或幽灵清理成功、删 marker 后，Host 会 best-effort 发送公开 `api-session/removed(sessionId)`。已实证安装版 rc.5 的 Host transport 会下发到真实 Client catalog，移除否则会在「未分组」重新显示的陈旧行。失败/排队不发通知；通知异常仅记 `removed/warning`，不改变删除成功结果。
 
 完整协议和恢复边界见 [DETAIL.md](./docs/DETAIL.md) 与 [PLAN.md](./PLAN.md)。
 
@@ -75,19 +77,19 @@ Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为�
 | Cordis | peer `^4.1.0` |
 | 原生文件系统支持 | POSIX：`@deepseek-ai/node-addon-system` peer `^0.1.2`；Windows：运行依赖 `koffi` 3.1.1 |
 | Node.js | `^22.19.0 || >=24.0.0` |
-| Host 平台 | macOS：完整隔离回归。Windows：维护者已于 2026-11-25 在 DSH 桌面 GUI 真机验证（安装、侧栏入口、收进回收站、恢复、彻底删除、清空）。Windows 专属的原生回归用例尚未运行。 |
-| 会话 backend | 物理删除仅支持 JSONL；POSIX 要求既有锁文件，Windows 无锁文件要求；路径、身份不可靠或原生互斥不可用时明确拒绝 |
+| Host 平台 | 5.2：macOS 隔离回归及注入临时用户目录的原生 rename 通过；两平台真实系统回收站 GUI 验收待进行。历史第 4 期 Windows 流程：维护者已于 2026-11-25 在 DSH 桌面 GUI 真机验证（安装、侧栏入口、收进回收站、恢复、彻底删除、清空）。Windows 专属的原生回归用例尚未运行。 |
+| 会话 backend | 移入系统回收站仅支持 JSONL；POSIX 要求既有锁文件，Windows 无锁文件要求；路径、身份不可靠或原生互斥不可用时明确拒绝 |
 
-Windows GUI 删除流程已由维护者于 2026-11-25 真机验证；Windows 专属的原生回归用例与 rc.2 桌面 GUI 未运行。[Windows 自检命令](./docs/DETAIL.md#windows-self-check) 只使用合成临时 home。
+历史第 4 期 Windows GUI 删除流程已由维护者于 2026-11-25 真机验证，不代表 5.2 系统回收站已验收；Windows 专属的原生回归用例与 rc.2 桌面 GUI 未运行。[Windows 自检命令](./docs/DETAIL.md#windows-self-check) 与 [5.2 真机步骤](./docs/DETAIL.md#p52-manual-acceptance) 只使用合成临时 home。
 
 peer 区间允许兼容更新，不代表后续 DSH 版本已验收。升级后应复核 Client 工作区投影和原生锁。
 
 ## 已知限制
 
 - Client 移除通知为 best effort，断线后不重放；`removed/ok` 仅代表本地 emit 返回，不是客户端回执，较早的 Host 监听器抛错也可能阻断下发。重连由官方 catalog 全量读取修复；原生后续 re-add、subagent lineage 保留和搜索同步仍由 DSH 负责。新增 transport/catalog 隔离探针使用安装版 rc.5 合成数据，探针本身不等于 GUI 或 Windows 真机验收。
-- 已加载/已 enter 的会话可能长期由 DSH 持有写租约。删除/清空遇到 lock-busy 会先排队，保留日志、归档和工作区归属；重启 DSH 后 Host 自动重试，若仍 busy 则保留到下次启动，也可手动再次彻底删除。启动扫描在后台执行，服务未就绪时退避重试，其它错误按阶段报告。官方无公开卸载/close API；插件不释放其它所有者的句柄，不绕过租约、不 unlink 活锁文件、不夺锁。
+- 已加载/已 enter 的会话可能长期由 DSH 持有写租约。删除/清空遇到 lock-busy 会先排队，保留日志、归档和工作区归属；重启 DSH 后 Host 自动重试，若仍 busy 则保留到下次启动，也可手动再次移入系统回收站。启动扫描在后台执行，服务未就绪时退避重试，其它错误按阶段报告。官方无公开卸载/close API；插件不释放其它所有者的句柄，不绕过租约、不 unlink 活锁文件、不夺锁。
 - 保留附件、工作区文件、Git worktree、产物、服务端日志、备份及其它插件快照。
-- 不承诺安全擦除；搜索结果依赖 DSH 既有同步收敛，不保证立即消失；投影缓存清理失败只记 warning。
+- 日志在用户或系统清空系统回收站前保留系统层面恢复可能。插件无法感知何时清空，不承诺不可恢复；macOS 不保证「放回原处 / Put Back」元数据，可能需要手动移回原路径。系统恢复不会自动补回已清理的插件/原生 registry 记录。Windows 恢复遵循系统回收站策略，仅接受有同卷可用回收站的固定本地盘。搜索仍依赖 DSH 同步；投影缓存清理失败只记 warning。
 - 回收站会话仍属于归档集合，原生「显示已归档 / 全部对话」视图仍可显示。
 - 操作不是跨服务或跨进程事务。凭据支持进程崩溃后恢复，不保证断电级目录 `fsync`；无凭据的陌生暂存目录保留。
 - 审计日志为 best effort：超过 4 MiB 后在下一次追加前轮转，保留三份归档（`trash.log.1`–`.3`），约 16 MiB 历史但可能超限；缺少日志不能证明操作没有发生。
@@ -108,7 +110,7 @@ grep -h '"action":"recovery"' ~/.dsh/logs/trash.log ~/.dsh/logs/trash.log.[123]
 
 这不是跨进程强一致：其它实例已持有的旧句柄可继续将完整行写入轮转文件，使 `.1` 偏大。短时 `trash.log.rotate` 目录协调协作进程的轮转；guard 忙或崩溃残留时有界等待后降级 logger，不自动抢占。恢复与并发边界见 [DETAIL.md](./docs/DETAIL.md)。归档尚未生成时，glob 命令可能提示文件不存在。
 
-日志失败降级到 Host logger，不改变主操作结果。该文件用于诊断，不是物理删除的业务凭据存储。
+日志失败降级到 Host logger，不改变主操作结果。该文件用于诊断，不是移动操作的业务凭据存储。
 
 ## License
 

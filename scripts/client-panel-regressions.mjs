@@ -110,7 +110,7 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   // and Host service, rather than calling store.upsert/remove in the test.
   const originalHostMove = hostRemote.trashSession
   for (const slot of ['trash-menu', 'trash-action']) {
-    for (const destructive of ['Delete forever', 'Empty trash']) {
+    for (const destructive of ['Move to system trash', 'Empty trash']) {
       let releaseResponse, signalCommit
       const committed = new Promise(resolve => { signalCommit = resolve })
       const response = new Promise(resolve => { releaseResponse = resolve })
@@ -124,7 +124,7 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
       }
       const late = entries.get(slot).options.inject().moveToTrash(id)
       await committed
-      if (destructive === 'Delete forever') button(row(view.render(), id.slice(0, 12)), destructive).props.onClick()
+      if (destructive === 'Move to system trash') button(row(view.render(), id.slice(0, 12)), destructive).props.onClick()
       else button(view.render(), destructive).props.onClick()
       button(group(view.render()), destructive).props.onClick(); await tick()
       assert.equal(records.has(id), false)
@@ -201,8 +201,8 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   assert.doesNotMatch(text(view.render()), /live-menu/)
   assertAlert(view.render(), /Could not load trash/)
 
-  button(row(view.render(), 'live-hover'), 'Delete forever').props.onClick()
-  button(group(view.render()), 'Delete forever').props.onClick()
+  button(row(view.render(), 'live-hover'), 'Move to system trash').props.onClick()
+  button(group(view.render()), 'Move to system trash').props.onClick()
   await tick()
   assert.doesNotMatch(text(view.render()), /live-hover/)
   assert.doesNotMatch(text(observer.render()), /live-hover/)
@@ -366,19 +366,19 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   assert.equal(callsOf('listTrash').length, ++listCalls)
   assert.doesNotMatch(text(tree), /Saved title/)
 
-  button(row(tree, 'Renamed title'), 'Delete forever').props.onClick()
+  button(row(tree, 'Renamed title'), 'Move to system trash').props.onClick()
   assert.equal(callsOf('removeFromTrash').length, 0, 'first click must only ask for confirmation')
   tree = view.render()
   group(tree).props.onKeyDown({ key: 'Escape' })
   assert.equal(find(view.render(), x => x.props.role === 'group'), undefined)
-  button(row(view.render(), 'Renamed title'), 'Delete forever').props.onClick()
+  button(row(view.render(), 'Renamed title'), 'Move to system trash').props.onClick()
   button(group(view.render()), 'Cancel').props.onClick()
   assert.equal(callsOf('removeFromTrash').length, 0)
-  button(row(view.render(), 'Renamed title'), 'Delete forever').props.onClick()
+  button(row(view.render(), 'Renamed title'), 'Move to system trash').props.onClick()
   tree = view.render()
-  assert.match(text(group(tree)), /Physical deletion.*cannot be undone/)
-  button(group(tree), 'Delete forever').props.onClick()
-  button(group(tree), 'Delete forever').props.onClick()
+  assert.match(text(group(tree)), /Moves local session logs.*system-level recovery/)
+  button(group(tree), 'Move to system trash').props.onClick()
+  button(group(tree), 'Move to system trash').props.onClick()
   await tick(); tree = view.render()
   assert.deepEqual(callsOf('removeFromTrash'), [['removeFromTrash', 'catalog-title']])
   assert.equal(records.has('catalog-title'), false)
@@ -408,8 +408,8 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   // retain its row/confirmation for retry, and reload partial Host commits after rejection.
   for (const [method, label, failurePattern] of [
     ['restoreSession', 'Restore', /Could not restore session/],
-    ['removeFromTrash', 'Delete forever', /Could not physically delete session/],
-    ['emptyTrash', 'Empty trash', /Could not empty trash/],
+    ['removeFromTrash', 'Move to system trash', /Could not move session to system trash/],
+    ['emptyTrash', 'Empty trash', /Could not move all sessions to system trash/],
   ]) {
     for (const failure of [true, 'throw']) {
       records.clear(); seed('retry', { titleSnapshot: 'Retry title' })
@@ -436,7 +436,7 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   }
 
   // Queue acknowledgements are status messages, preserve rows and allow cancellation.
-  for (const [method, label] of [['removeFromTrash', 'Delete forever'], ['emptyTrash', 'Empty trash']]) {
+  for (const [method, label] of [['removeFromTrash', 'Move to system trash'], ['emptyTrash', 'Empty trash']]) {
     const original = hostRemote[method]
     const restore = hostRemote.restoreSession
     for (const transport of [false, true]) {
@@ -479,10 +479,10 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   // transport failure paths. Human text and unrelated markers must not match.
   const lockError = new PurgeError('busy-session', 'lock',
     new Error('Session lock is busy; session may be open or writing'), TrashErrorCode.SessionLockBusy)
-  for (const [method, label] of [['removeFromTrash', 'Delete forever'], ['emptyTrash', 'Empty trash']]) {
+  for (const [method, label] of [['removeFromTrash', 'Move to system trash'], ['emptyTrash', 'Empty trash']]) {
     const original = hostRemote[method]
     const message = method === 'emptyTrash'
-      ? `${SESSION_LOCK_BUSY_PREFIX}Physical deletion: 1 deleted, 1 failed: ${lockError.message}` : lockError.message
+      ? `${SESSION_LOCK_BUSY_PREFIX}Move to system trash: 1 deleted, 1 failed: ${lockError.message}` : lockError.message
     for (const transport of [false, true]) {
       records.clear(); seed('busy-session', { titleSnapshot: 'Busy session' })
       hostRemote[method] = async () => {
@@ -505,7 +505,7 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
       view.unmount()
     }
     for (const message of [
-      'Physical deletion [lock] (busy-session): Session lock is busy; session may be open or writing',
+      'Move to system trash [lock] (busy-session): Session lock is busy; session may be open or writing',
       '[D_TRASH_SESSION_LOCK_BUSY_OTHER] unrelated failure',
       `Other error mentioning ${SESSION_LOCK_BUSY_PREFIX}in its detail`,
       '[D_TRASH_DEFERRED_OTHER] unrelated failure',
@@ -552,14 +552,14 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   const listBeforePending = remote.listTrash
   remote.listTrash = async () => ({ ok: true, value: [['pending-deletion', { trashedAt: 1, purgePending: true }]] })
   view = setup(); view.render(); await tick(); tree = view.render()
-  assert.match(text(tree), /Deletion is unfinished/)
+  assert.match(text(tree), /Move or cleanup is unfinished/)
   assert.equal(button(row(tree, 'pending-dele'), 'Restore').props.disabled, true)
   setLanguage('zh')
-  assert.match(text(view.render()), /删除尚未完成/)
-  button(view.render(), '彻底删除').props.onClick()
-  assert.match(text(group(view.render())), /物理删除.*不可恢复/)
+  assert.match(text(view.render()), /移动或清理尚未完成/)
+  button(view.render(), '移入系统回收站').props.onClick()
+  assert.match(text(group(view.render())), /系统废纸篓.*系统层面恢复/)
   setLanguage('en')
-  assert.match(text(group(view.render())), /Physically delete.*cannot be undone/)
+  assert.match(text(group(view.render())), /Move.*system trash.*recovered/)
   view.unmount()
   remote.listTrash = listBeforePending
 

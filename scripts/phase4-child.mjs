@@ -17,7 +17,7 @@ if (mode === 'audit') {
 } else if (mode === 'crash') {
   const f = await fixture(value)
   f.hooks.report = (id, stage) => {
-    if (stage === 'renamed') process.kill(process.pid, 'SIGKILL')
+    if (stage === 'moved-to-trash') process.kill(process.pid, 'SIGKILL')
   }
   await f.trash.removeFromTrash('a')
   throw new Error('Crash hook was not reached')

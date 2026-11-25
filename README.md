@@ -4,19 +4,19 @@
 
 GitHub primary repository · [Gitee mirror](https://gitee.com/huang-lin-java/d-trash)
 
-A session recycle bin for DeepSeek Harness (DSH), with restore and permanent local session log deletion.
+A session recycle bin for DeepSeek Harness (DSH), with restore and moving local session logs to system trash.
 
 ## Why
 
-Long session histories make the sidebar hard to navigate. Native archiving hides sessions but does not provide a separate recycle bin. `d-trash` adds a place to review those sessions, restore them, or delete their local logs.
+Long session histories make the sidebar hard to navigate. Native archiving hides sessions but does not provide a separate recycle bin. `d-trash` adds a place to review those sessions, restore them, or move their local logs to system trash.
 
 ## Features
 
 - **Move to Trash** from a session's context menu or hover action; keep its logs and workspace membership.
 - **Restore** a session by unarchiving it and keeping its current workspace position.
-- **Delete forever** after confirmation; remove local session logs and necessary registry records. This cannot be undone.
-- **Queue busy sessions** for automatic deletion after restarting DSH; Restore cancels the queue.
-- **Empty Trash** across workspaces, with separate deleted, queued, and failed counts.
+- **Move to system trash** after confirmation; move the whole local session log directory to macOS Trash or Windows Recycle Bin, then clean necessary registry records. System-level recovery remains available.
+- **Queue busy sessions** for automatic system-trash move retries after restarting DSH; Restore cancels the queue.
+- **Empty Trash** across workspaces, with separate moved, queued, and failed counts.
 - **Audit operations** in a local JSONL log, with stages and failure reasons.
 
 The global panel lists sessions newest first, with titles, current workspaces, and English/Chinese UI text.
@@ -49,21 +49,23 @@ These instructions do not assume an npm release; do not use a bare `d-trash` reg
 | Session row → hover trash icon | Move the session to Trash |
 | Left sidebar → Trash | Open the global recycle bin panel |
 | Panel → Restore | Return a session to the normal session list |
-| Panel → Delete forever | Confirm permanent deletion of that session's local logs |
-| Panel → Empty Trash | Confirm permanent deletion of all Trash sessions |
+| Panel → Move to system trash | Confirm moving that session's local logs to system trash |
+| Panel → Empty Trash | Confirm moving all Trash sessions to system trash |
 | Panel → Refresh | Reload the list and workspace projection |
 
-Deletion requires inline confirmation; Cancel or Escape dismisses it. A queued session shows “Pending deletion (automatically completes after restarting DSH)”. Restore cancels its queue and keeps it archived in Trash with its logs and workspace membership; a later Restore uses the ordinary unarchive behavior. Once physical deletion has started and a purge receipt exists, Restore is disabled: retry deletion to finish cleanup.
+Deletion requires inline confirmation; Cancel or Escape dismisses it. A queued session shows “Pending move to system trash (automatically retries after restarting DSH)”. Restore cancels its queue and keeps it archived in Trash with its logs and workspace membership; a later Restore uses the ordinary unarchive behavior. Once moving to system trash has started and a purge receipt exists, Restore is disabled: retry Move to system trash to finish cleanup.
 
 ## How it works
 
 The Host service is the only writer of Trash state. Ordinary visible Trash is **`marker ∩ archived`**: native Archive never creates a Trash marker. Native unarchive removes a session from that intersection; the next Host list reconciles its stale marker. Native Archive and Pin behavior is preserved.
 
-Permanent deletion requires a validated JSONL session path and matching filesystem identity. The Host acquires backend-compatible write exclusion: official `flock` on an existing `session.lock` on POSIX, or the backend-named kernel semaphore via Koffi on Windows, persists deletion intent, rechecks identity, renames the whole session directory into a same-device staging directory beside `sessions`, closes the lock, then removes the staged directory. It then clears workspace membership, archive state, and the marker, and attempts projection-cache cleanup. Failed cleanup keeps durable receipts for a later delete/empty retry; pending diagnostics stay visible independently of the ordinary Trash intersection.
+Moving to system trash requires a validated JSONL session path and matching filesystem identity. The Host acquires backend-compatible write exclusion: official `flock` on an existing `session.lock` on POSIX, or the backend-named kernel semaphore via Koffi on Windows. It persists a source-only move intent, rechecks identity and archive/marker gates, moves the whole directory to same-volume system trash, confirms the source is absent, and releases the lease. It then clears workspace membership, archive state and marker, and attempts projection-cache cleanup. macOS uses exclusive rename to `~/.Trash/d-trash-<uuid>` without Finder/osascript or permission-request APIs; Windows uses `SHFileOperationW` with `FOF_ALLOWUNDO` and suppressed UI. Unsupported platforms, cross-volume moves and unavailable native trash are rejected; there is no copy or physical-delete fallback.
+
+Failed cleanup keeps durable receipts for retry. Recovery checks the source: if present with the same identity, cancel the unmoved intent and repeat all gates; if absent, continue record cleanup without guessing the system destination. Old staging receipts remain recoverable: validate them and move any remaining directory to system trash, never recursively delete it. Pending diagnostics stay visible independently of the ordinary Trash intersection.
 
 If a stale Client list moves an already deleted session back to Trash, a first `stat` returning exactly `undefined` allows record cleanup while its marker exists and it remains archived. The Host skips log deletion, detaches current owning workspaces, unarchives, removes the marker, and attempts projection cleanup; delete returns `true`, and empty counts it as a success. Audit stage `logs-absent` explains this case. A thrown `stat` error (including I/O errors), a mismatched header id, a non-JSONL snapshot, or a relative/missing location still refuses cleanup. Existing purge receipts always follow receipt validation and recovery. Projection cleanup uses a previously validated stat/source home or another reliable session; without one it records a warning, and audit logging falls back to the Host logger.
 
-After physical deletion or ghost cleanup commits the marker removal, the Host best-effort emits the public `api-session/removed(sessionId)` event. The verified installed rc.5 Host transport forwards it to the real Client catalog, removing the stale row that would otherwise reappear under Ungrouped. Failed or queued deletion never sends it; notification errors only record `removed/warning` and preserve deletion success.
+After moving to system trash or ghost cleanup commits the marker removal, the Host best-effort emits the public `api-session/removed(sessionId)` event. The verified installed rc.5 Host transport forwards it to the real Client catalog, removing the stale row that would otherwise reappear under Ungrouped. Failed or queued deletion never sends it; notification errors only record `removed/warning` and preserve deletion success.
 
 See [DETAIL.md](./docs/DETAIL.md) and [PLAN.md](./PLAN.md) for the full protocol and recovery boundaries.
 
@@ -75,19 +77,19 @@ See [DETAIL.md](./docs/DETAIL.md) and [PLAN.md](./PLAN.md) for the full protocol
 | Cordis | Peer `^4.1.0` |
 | Native filesystem support | POSIX: `@deepseek-ai/node-addon-system` peer `^0.1.2`; Windows: bundled dependency `koffi` 3.1.1 |
 | Node.js | `^22.19.0 || >=24.0.0` |
-| Host platform | macOS: full isolation regressions. Windows: maintainer-verified in the DSH desktop GUI on 2026-11-25 (install, sidebar entry, Move to Trash, Restore, Delete forever, Empty Trash). The Windows-only native regression cases are not run yet. |
-| Session backend | JSONL only for permanent deletion; POSIX requires an existing lock file; Windows needs no lock file; unreliable paths/identity or unavailable native exclusion are rejected |
+| Host platform | 5.2: macOS isolation regressions and native rename into an injected temporary user home; real system Trash/Recycle Bin GUI acceptance is pending on both platforms. Earlier phase 4 Windows flow: maintainer-verified in the DSH desktop GUI on 2026-11-25 (install, sidebar entry, Move to Trash, Restore, Delete forever, Empty Trash). The Windows-only native regression cases are not run yet. |
+| Session backend | JSONL only for moving to system trash; POSIX requires an existing lock file; Windows needs no lock file; unreliable paths/identity or unavailable native exclusion are rejected |
 
-The Windows GUI delete flow was verified by the maintainer on 2026-11-25; the Windows-only native regressions and the rc.2 Desktop GUI were not run. [Windows self-check commands](./docs/DETAIL.md#windows-self-check) use temporary synthetic homes only.
+The earlier phase 4 Windows GUI delete flow was verified by the maintainer on 2026-11-25; this does not verify 5.2 system trash behavior; the Windows-only native regressions and the rc.2 Desktop GUI were not run. [Windows self-check commands](./docs/DETAIL.md#windows-self-check) and [5.2 manual acceptance steps](./docs/DETAIL.md#p52-manual-acceptance) use temporary synthetic homes only.
 
 Peer ranges allow compatible updates; they do not mean later DSH versions have been tested. Recheck Client workspace projection and native locking after upgrading.
 
 ## Known limitations
 
 - Client removal notifications are best effort and are not replayed after disconnection. `removed/ok` confirms local emission, not Client receipt; an earlier throwing Host listener can prevent forwarding. The official catalog re-reads on reconnect. Native later re-additions, retained subagent lineage, and search synchronization remain DSH-owned. The new transport/catalog probe uses installed rc.5 with synthetic data; the probe itself is not GUI or Windows acceptance.
-- Loaded/entered sessions can remain locked by DSH. Delete/Empty queues lock-busy sessions without changing their logs, archive state, or workspace membership. Restart DSH to let the Host retry automatically; if a session is still busy it stays queued for the next restart, and Delete forever can also retry manually. Startup maintenance runs in the background, retries unavailable services with backoff, and reports other errors by stage. There is no public unload/close API; the plugin never releases another owner’s handle, bypasses a lease, unlinks a live lock file, or steals a lock.
+- Loaded/entered sessions can remain locked by DSH. Delete/Empty queues lock-busy sessions without changing their logs, archive state, or workspace membership. Restart DSH to let the Host retry automatically; if a session is still busy it stays queued for the next restart, and Move to system trash can also retry manually. Startup maintenance runs in the background, retries unavailable services with backoff, and reports other errors by stage. There is no public unload/close API; the plugin never releases another owner’s handle, bypasses a lease, unlinks a live lock file, or steals a lock.
 - Attachments, workspace files, Git worktrees, artifacts, server logs, backups, and other plugins' snapshots remain.
-- Deletion is not secure erasure. Search results may take time to converge through DSH's existing synchronization; cache cleanup failures are warnings.
+- Logs remain recoverable at the system level until the user or OS clears system trash. The plugin cannot detect that clearing and makes no irrecoverability guarantee. macOS Put Back metadata is not guaranteed; manual restoration to the original path may be needed. System restoration does not recreate cleared plugin/native registry records. Windows recovery follows system Recycle Bin policies; only fixed local volumes with an available same-volume bin are accepted. Search results still depend on DSH synchronization; cache cleanup failures are warnings.
 - Trash sessions remain archived, so native views configured to show archived/all sessions can still display them.
 - Operations are not a cross-service or cross-process transaction. Crash recovery uses durable receipts; power-loss-safe directory `fsync` is not guaranteed. Unknown staging directories without receipts are left alone.
 - Audit logging is best effort: rotate before the next append after exceeding 4 MiB, keeping three archives (`trash.log.1`–`.3`). About 16 MiB of history is retained, with possible overshoot; missing records do not prove an operation did not happen.

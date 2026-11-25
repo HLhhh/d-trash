@@ -106,15 +106,15 @@ await test('gate, stat, intent and rm failures never emit; recovery alone never 
   f.hooks.put = (id, record) => { if (record.purge) throw new Error('intent failed') }
   await assert.rejects(f.trash.removeFromTrash('a'), /\[intent\]/)
   delete f.hooks.put
-  const remove = f.trash.purger.removeDirectory.bind(f.trash.purger)
-  f.trash.purger.removeDirectory = async () => { throw new Error('rm failed') }
-  await assert.rejects(f.trash.removeFromTrash('a'), /\[delete-staged\]/)
+  const remove = f.trash.purger.systemTrash.move.bind(f.trash.purger.systemTrash)
+  f.trash.purger.systemTrash.move = async () => { throw new Error('rm failed') }
+  await assert.rejects(f.trash.removeFromTrash('a'), /\[moved-to-trash\]/)
   assert.deepEqual(ids, [])
-  f.trash.purger.removeDirectory = remove
-  // Deleting b recovers a's staged logs, but a still has a marker and ownership.
+  f.trash.purger.systemTrash.move = remove
+  // Deleting b cancels a's unmoved intent; a keeps its marker and ownership.
   assert.equal(await f.trash.removeFromTrash('b'), true)
   assert.deepEqual(ids, ['b'])
-  assert.equal(f.medium.get('a').purge.logsDeleted, true)
+  assert.equal(f.medium.get('a').purge, undefined)
   assert.equal(f.members.has('a'), true)
   assert.equal(await f.trash.removeFromTrash('a'), true)
   assert.deepEqual(ids, ['b', 'a'])

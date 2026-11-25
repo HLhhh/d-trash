@@ -15,9 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Documentation: the Windows GUI delete flow is recorded as maintainer-verified on 2026-11-25 (install, sidebar entry, Move to Trash, Restore, Delete forever and Empty Trash on native Windows). The six Windows-only native regression cases and the rc.2 Desktop GUI remain unrun; the compatibility tables, plan and project notes state that boundary.
+- Sessions can now be moved to macOS Trash or Windows Recycle Bin, including Empty Trash, for system-level recovery. Same-volume native moves retain safety gates, retryable source-only intents and legacy staging recovery; unsupported platforms and cross-volume moves are refused without a copy/delete fallback. macOS uses no Finder automation and does not guarantee Put Back metadata. English/Chinese UI and docs are aligned; isolated regression coverage includes failures, crashes, busy queues, legacy receipts and batch summaries. Real system Trash/Recycle Bin GUI acceptance remains pending.
 
-### Changed
+- Documentation: the earlier phase 4 Windows GUI delete flow is recorded as maintainer-verified on 2026-11-25 (install, sidebar entry, Move to Trash, Restore, Delete forever and Empty Trash on native Windows). The six Windows-only native regression cases and the rc.2 Desktop GUI remain unrun; the compatibility tables, plan and project notes state that boundary.
 
 - The changelog is now bilingual: `CHANGELOG.md` (English) and `CHANGELOG_zh.md` (简体中文) are maintained as one record with matching structure and order. Every change must add an `[Unreleased]` entry to both files; the release checklist (version bump, tag, GitHub Release) is recorded in `AGENTS.md`.
 

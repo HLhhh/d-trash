@@ -1,6 +1,6 @@
-# d-trash — 第 1–4 期（会话回收站与物理删除）
+# d-trash — 会话回收站与系统回收站（第 5.2 期）
 
-第 1–4 期已交付。收进保留日志并归档；普通恢复不变；彻底删除与清空现为物理删除本地会话日志、不可恢复。
+第 1–4 期及 5.2 已交付。收进保留日志并归档；普通恢复不变；单条移出与清空均将日志目录移入系统回收站，可在系统层面恢复。第 4 期「staging→rm、不可恢复」终态**已废弃**。
 方案以随包提供的 `PLAN.md` 为准。既有真机入口和第 4 期两个会话的清理验收已通过（用户既有记录）；
 本次开源整理仅运行隔离回归，未安装、重载或修改真实 profile，未操作真实会话。
 
@@ -19,8 +19,8 @@
 | --- | --- | --- |
 | `trashSession(sessionId)` | 先原生归档（`stopActivity: true`），写 marker 前后均校验归档；发现原生取消归档则删 marker 并抛错 | `Promise<void>` |
 | `restoreSession(sessionId)` | 排队项只移除 deferredAt、保留归档/普通 marker；普通项先删 marker 再取消归档，失败且仍归档时才补回 | `Promise<void>` |
-| `removeFromTrash(sessionId)` | 门禁后持锁整体迁移、关锁、删除日志，再清归属/归档/marker/投影缓存 | `Promise<boolean>`（成功 true；lock-busy 排队抛 `[D_TRASH_DEFERRED]`，其它错误带阶段） |
-| `emptyTrash()` | 全局边界内逐条物理删除，分别汇总删除/排队/失败数与阶段 | `Promise<number>`（全成功返回删除数；纯排队抛 DeferredError，真失败抛 AggregateError） |
+| `removeFromTrash(sessionId)` | 门禁后持锁整体移入系统回收站、确认源不在、关锁，再清归属/归档/marker/投影缓存 | `Promise<boolean>`（成功 true；lock-busy 排队抛 `[D_TRASH_DEFERRED]`，其它错误带阶段） |
+| `emptyTrash()` | 全局边界内逐条移入系统回收站，分别汇总删除/排队/失败数与阶段 | `Promise<number>`（全成功返回删除数；纯排队抛 DeferredError，真失败抛 AggregateError） |
 | `listTrash()` | 对账普通 stale marker；保留 purge 凭据，返回不含私有路径的记录副本与可选 purgePending/deferred | `Promise<Array<[SessionId, TrashRecord]>>` |
 
 marker 包含 `trashedAt`，schema 保留可选 `workspaceId`、`titleSnapshot`；私有 `deferredAt` 表示锁忙后排队，独立于 purge 凭据。
@@ -36,7 +36,7 @@ marker 写入失败时，仅在原先未归档且确认没有 marker 时撤销�
 未知提交状态/不可读 domain 不触发危险撤销。恢复若已取消归档但后续报错，不补回 active marker。
 操作和补偿都失败时抛 `AggregateError`，保留两项错误与原始 cause；后续读取可重试清理。
 
-## 物理删除与失败恢复
+## 移入系统回收站与失败恢复
 
 官方把 session pruning 定义为带外 backend maintenance，持久化 seam 无 delete API。
 `src/purge.ts` 使用 `src/write-lease.ts` 的 backend 兼容写租约：POSIX 保留官方
@@ -54,41 +54,43 @@ locate 和审计日志不依赖锁文件；日志存在时，任何平台缺少�
 
 无 purge 凭据时，首次定位严格区分三种结果：
 
-- `stat(id) === undefined`：按 persistence 契约确认日志已不存在；在 stat 前后检查 marker 存在且仍归档，跳过锁、intent、rename、rm，只走 detach 当前所属工作区 → unarchive → 删 marker → 尝试清投影缓存。成功返回 `true`，empty 计成功一项；以 `logs-absent/ok` 写明「stat 返回 undefined、日志已不存在、只清记录」，不伪造 `logs-deleted`。
+- `stat(id) === undefined`：按 persistence 契约确认日志已不存在；在 stat 前后检查 marker 存在且仍归档，跳过锁、intent、rename、rm，只走 detach 当前所属工作区 → unarchive → 删 marker → 尝试清投影缓存。成功返回 `true`，empty 计成功一项；以 `logs-absent/ok` 写明「stat 返回 undefined、日志已不存在、只清记录」，不伪造 `moved-to-trash`。
 - 返回 snapshot 但 header.id 不匹配、非 JSONL、路径非绝对或 location 缺失：仍在 gate 拒绝，保留记录与日志；可靠 snapshot 对应的文件系统校验失败（包括 ENOENT）也不等同于 stat 返回 undefined。
 - stat 抛错：保留错误与 cause，在 gate 拒绝，绝不把 I/O 故障或抛出的 ENOENT 转为「已删除」。取锁后/intent 后复核时的 undefined 仍拒绝，不切换幽灵分支。
 
-该分支处理客户端陈旧列表将已成功物理删除的 id 再次收进造成的幽灵记录。已有 purge 凭据优先执行原恢复协议，非法凭据不能借 undefined 绕过校验。幽灵记录不生成虚构 source/target 或删除凭据；detach 等必要记录清理失败仍按实际阶段报告，普通 marker 仍遵守归档交集/对账规则。可重试时再次执行 stat 与归档门禁，不承诺幽灵清理的跨服务事务。
+该分支处理客户端陈旧列表将已移走日志的 id 再次收进造成的幽灵记录。已有 purge 凭据优先执行原恢复协议，非法凭据不能借 undefined 绕过校验。幽灵记录不生成虚构 source/target 或删除凭据；detach 等必要记录清理失败仍按实际阶段报告，普通 marker 仍遵守归档交集/对账规则。可重试时再次执行 stat 与归档门禁，不承诺幽灵清理的跨服务事务。
 Host 缓存由 stat/source 校验过的 home，供后续幽灵记录的投影清理复用；重启后可从其它可靠会话/凭据定位。清投影仍重新校验 canonical home/cache 路径；没有可靠 home 时仅 `projection/warning`，不从环境变量或 session id 猜路径，日志依既有规则降级 logger。
 
-执行顺序是写租约 → 复核 → marker 保存 purge intent → 最后复核 → 整体 rename 到
-`$DSH_HOME/sessions.trash-purge-staging/<encoded-id>-<uuid>` → close 释放锁 →
-递归 rm 暂存 → detach 当前包含该 session 的各工作区 → unarchive → 删 marker → best-effort removed 通知 → 尝试删除投影缓存。
-逐工作区检查成员并汇总实际 detach 失败；不调用非成员工作区，不产生其 no-op 日志。
-重试时重新读取成员投影，已完成 detach 的工作区跳过；零归属会话仍正常完成其余清理。
-暂存是 sessions 根的兄弟目录，与 source 的 dev 必须相同；从不在持锁期间 unlink `session.lock`。
-旧根内点目录暂存方案已废弃：JSONL 把根下每个目录当 project、其每个子目录当 session，
-不会过滤点目录。兄弟暂存处于发现树外，rename 后即使崩溃残留也不会被 list 重新发现。
-正常收进与恢复顺序沿用原协议；已有 purge 凭据时拒绝恢复或重新收进，防止丢凭据。
+执行顺序：写租约 → 复核 → marker 保存 `moving: true / source / dev / ino` → 最终复核归档+marker、路径与租约 → 整体移入系统回收站 → 确认源目录不存在 → close 释放租约 → detach 当前所属工作区 → unarchive → 删 marker → best-effort removed 通知 → 尝试清投影缓存。
+不在持锁期间 unlink 活锁文件；先确认日志已随目录离开，才清记录。detach 逐工作区检查当前成员关系并汇总实际失败，不调用无关工作区；重试跳过已完成的归属。旧 staging→close→递归 rm 流程**已废弃**，没有直接删除旁路。
 
-marker 的可选私有 `purge` 存 source/target/dev/ino/deleting/logsDeleted；Remote 只返回
-`purgePending`。普通 trash 交集不变，已开始删除的诊断记录不随原生取消归档而消失。
-日志与必要记录清理完成前保留 marker，`listTrash` 不惰性删除这些凭据。
-每次 purge/empty 先恢复全部已记录暂存；日志已迁移/删除时，从原 stat 写入凭据的 `source` 反推并校验 home 和 sessions 根。
-要求 `dirname(target)` 严格等于该 home 的兄弟暂存，复核身份和锁后关闭锁再 rm；
-旧根内暂存凭据或其它非法 target 保留诊断，不自动迁移、删除或撤销凭据；
-部分 rm 删除锁后凭 durable deleting 阶段继续重试。无凭据、路径不可靠或 source 被重建时拒绝猜测。
-未发生 rename 的 intent 可安全撤销；已删除日志而记录失败可直接重试记录清理。
-有凭据的投影清理接收 `deleteStaged` 返回的已验证 home；幽灵分支使用上述已验证 home，均不从环境变量取路径。
-原生写入与插件不是一个事务；全局插件边界覆盖恢复/删除/清空，不能阻止原生取消归档或重建路径。
+### 平台机制
 
-失败用 `Physical deletion [stage] (id): reason` 报告，结构化日志包含 sessionId/stage/result/reason。
+- **macOS**：校验用户 home 和 `~/.Trash` 的 canonical 路径及目录身份、比较 dev，直接 `renamex_np(RENAME_EXCL)` 到 `~/.Trash/d-trash-<uuid>`。RENAME_EXCL 原子拒绝任何已有目标，包括空目录。使用 POSIX 文件系统接口，不调用 Finder、osascript、Apple Events 或权限申请接口；访问被拒绝就报错，不引导或触发 Finder 自动化授权。不给「放回原处 / Put Back」元数据保证，恢复时可能需要手动移回原路径。SDK `sys/stdio.h` 的 RENAME_EXCL 为 `0x4`；本轮 ABI 测试只在注入的临时用户 home 下创建 `.Trash`，不访问真实用户废纸篓。
+- **Windows**：Koffi 调用 `SHFileOperationW(FO_DELETE)`，固定 `FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT`，不调用 DeleteFile/rm。只传一条双 NUL 结尾 UTF-16 绝对路径，拒绝 UNC、通配符、嵌入 NUL、MAX_PATH 及挂载别名。先经 GetVolumePathNameW/GetDriveTypeW 确认固定本地卷、校验同卷 `$Recycle.Bin`，SHQueryRecycleBinW 成功后才调用 Shell；返回码非零或 `fAnyOperationsAborted` 均报错，保留 Shell 错误码及可读原因，不对该 API 使用 GetLastError。Win32 struct 按 shellapi.h pack(1)，Win64 自然对齐。系统负责回收站来源信息；恢复保留期限和回收站策略由 Windows 决定，5.2 Windows 真机验收尚未进行。
+- **其它平台/跨卷**：明确拒绝。macOS 不改走其它卷的 `.Trashes`，Windows 不改走另一盘的 bin；不 copy、不直接删除、不降级绕过租约。Windows sharing 类错误最多重试 5 次，每次重新检查 stat、身份、租约和归档+marker 门禁；EXDEV 不重试。
+
+原生依据：[Microsoft SHFileOperationW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shfileoperationw)、[SHFILEOPSTRUCTW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-shfileopstructw)、[官方 shellapi.h](https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/shellapi.h)。FOF_ALLOWUNDO 为系统恢复路径，插件无法感知用户或系统何时清空回收站，不提供“不可恢复”承诺。
+
+### intent / 崩溃恢复 / 旧凭据
+
+新 intent 的 `moving: true` 表示“已开始移动”，并非系统已接收；目标名称由系统或实现分配，不入持久 schema，不依赖目标身份。
+恢复先校验原 source 的 home/根路径：
+
+- 源仍在：必须仍为同一 canonical 普通目录、dev/ino 相符；撤销未迁移 intent，重新调用时走完整归档+marker 门禁和写租约。移动失败保留凭据，list/restore/re-trash 不能丢弃；原生取消归档后仍拒绝重新移动。
+- 源不在：视为已移走，继续记录清理；不要求定位或枚举系统回收站目标。即便原调用移动后、确认/审计前崩溃也按此恢复。用户已清空系统回收站也不阻塞清记录。
+- 源被替换、路径不可靠或观察 I/O 错误：保留凭据诊断，拒绝猜测。intent 尚未写入就失败，不移动源。
+
+旧 `target/dev/ino/deleting/logsDeleted` 凭据仍只接受同 home 的 `sessions.trash-purge-staging/<encoded-id>-…` 直属路径；旧根内暂存或任意其它目标保留诊断。原 source 存在且身份匹配、target 不在时撤销 intent；source 不在且 target 身份匹配时，持原路径 Windows 信号量和暂存目录写租约，把剩余目录移入系统回收站。先持久 `moving: true`，移动后 target 不在可幂等继续；旧 deleting 允许兼容部分 rm 已丢失锁文件的情况，仍不 unlink 活锁。旧 target 已不存在仅在 deleting/logsDeleted/moving 有证据时继续清记录。无凭据的目录不扫不移不删。
+凭据仍用 domain version 1 的可选 purge 联合 schema，公开列表只暴露 purgePending，不泄漏私有路径。已有凭据不得降级旧插件。新旧凭据的投影清理复用已校验 source home；幽灵分支沿用前述可靠 home 规则。原生操作与插件并非跨进程事务，移动与 marker commit 之间允许进程中断；不保证断电级 fsync。
+
+失败用 `Move to system trash [stage] (id): reason` 报告，结构化日志包含 sessionId/stage/result/reason。
 取写租约遇到占用时，Host `PurgeError.code` 为 `D_TRASH_SESSION_LOCK_BUSY`，消息以精确前缀
 `[D_TRASH_SESSION_LOCK_BUSY] ` 开头。Host 仅对无 purge、仍归档的 lock-busy 持久排队，返回 `[D_TRASH_DEFERRED] ` 确认；底层阶段、id、busy 原因与 cause 保留。其它阶段的 EBUSY 不排队，排队写入失败报告 deferred 阶段真失败。
-Client 精确识别排队前缀并显示中英「已排队」status，关闭确认框；不模糊匹配 busy/lock 文本。混合 empty 的真失败仍报错，消息分别含 deleted/failed/queued 数，AggregateError.errors 只含真失败；纯排队使用 DeferredError，全成功返回删除数。
+Client 精确识别排队前缀并显示中英「已排队」status，关闭确认框；不模糊匹配 busy/lock 文本。混合 empty 的真失败仍报错，消息分别含 deleted/failed/queued 数（deleted 沿用计数名，表示已移走或幽灵清理成功，不代表物理销毁），AggregateError.errors 只含真失败；纯排队使用 DeferredError，全成功返回删除数。
 `emptyTrash` 尝试全部条目，失败汇总成功数与阶段。Client 对失败也重读列表和只读 Workspace 投影，
 显示部分成功和可重试的诊断条目。投影缓存失败只记录警告，此时 marker 可能已清除，不保证后续 purge 自动重试缓存。搜索索引依赖下一次稳定搜索观测时的现有同步收敛；已检查的 query API 没有公开 rescan，不调用私有 `_reconcile` 或直接编辑 SQLite。
-附件、工作区文件、worktree、产物、服务端日志、备份及其它插件扫描快照均保留；不承诺安全擦除或搜索立即消失。
+附件、工作区文件、worktree、产物、服务端日志、备份及其它插件扫描快照均保留；系统回收站恢复不会自动补回已清理的 registry/marker，插件不提供恢复导入功能，不承诺搜索立即消失。
 仅覆盖 JSONL 与进程崩溃，不声称断电事务；有 pending 凭据时不要降级旧版插件。
 
 ## 删除完成后移除 Client 目录行
@@ -100,7 +102,7 @@ Session Controller 的 ClientSessions/SessionManager → catalog 的 ids/byId �
 
 侧栏按 catalog 行与工作区成员求差集，把无归属的可见会话放入「未分组 / Ungrouped」。
 删除后仅清工作区/归档/marker 和磁盘缓存，不能移除仍驻留在 Client catalog 中的行；取消归档会让它重新可见。
-Host 现在在物理删除或幽灵清理成功、**删 marker 之后** best-effort 发出 removed，再尝试清投影缓存。
+Host 现在在移入系统回收站或幽灵清理成功、**删 marker 之后** best-effort 发出 removed，再尝试清投影缓存。
 成功记 `removed/ok`；emit 的同步异常仅记 `removed/warning`，不改变删除结果、empty 成功数或 complete/ok。
 这不是 Host registry 卸载操作；没有调用私有接口或直接修改 Client catalog。
 
@@ -122,14 +124,14 @@ Workspace model 和侧栏 deriveGroups：物理/幽灵删除后暂停通知，�
 不动会话日志/归档/工作区归属、不写 purge 凭据；Remote 列表仅暴露 `deferred: true`，仍属于普通 marker ∩ archived，原生取消归档后的 stale marker 仍由 list 对账。
 
 Cordis class-plugin `[Service.init]` 在构造/apply 后投递 0ms unref timer 并立即返回。Host 取所有排队项快照，
-逐项进入插件全局边界并重读 marker，调用原 `purgeSession`，完整保留 stat/realpath/dev/ino、官方写租约、intent/最终复核/rename/close/rm 门禁。
-成功后正常清日志/成员/归档/marker、尝试清投影；仍 busy 则保留到下次启动，本 Host 不轮询追锁；可手动再次彻底删除。
+逐项进入插件全局边界并重读 marker，调用原 `purgeSession`，完整保留 stat/realpath/dev/ino、官方写租约、intent/最终复核/移入系统回收站/close 门禁。
+成功后正常清成员/归档/marker、尝试清投影；仍 busy 则保留到下次启动，本 Host 不轮询追锁；可手动再次彻底删除。
 服务/domain 或尚未开始删除的其它阶段失败按实际阶段记录，后台按 1/2/4/…/30 秒退避重试；扫描异常不会拒绝初始化。
 卸载取消 timer，等待已接纳的维护操作后关 domain；依赖撤回时保守保留状态。此机制不保证抢在原生加载前完成，更不会强制删当前忙会话。
 
 真正写 purge intent 时移除 deferredAt；已有 purge 凭据不参与排队扫描，继续只由显式 purge/empty 恢复，不改变原校验语义。
 启动中其它阶段失败一旦留下 purge 凭据，就由既有恢复协议处理；list/restore/re-trash 不能丢凭据。
-面板显示「待删除（重启 DSH 后自动完成）」/“Pending deletion (automatically completes after restarting DSH)”。
+面板显示「待移入系统回收站（重启 DSH 后自动重试）」/“Pending move to system trash (automatically retries after restarting DSH)”。
 排队项点「恢复」只取消 deferredAt，保留普通 marker、归档、日志和归属；再次恢复走普通取消归档。删除按钮保留手动重试。
 
 绝不绕过写锁、不 unlink 活锁文件、不夺锁、不调用私有卸载接口。本轮只使用合成临时 home，未修改核心/profile 或操作真实会话；既有真机调查不作为本轮 GUI 复验。
@@ -169,15 +171,15 @@ POSIX 目录不存在则以 **0700** 创建；日志文件以 **0600** 创建并
 | `removeFromTrash` | purge 阶段 + 一条 `complete` 结果，包括门禁/依赖失败 |
 | `emptyTrash` | 每条会话的 purge 阶段与 `complete`，以及一条 `summary`；原因包含删除/失败/排队数，空列表也有汇总 |
 | `startup` | 每个排队条目的 purge 阶段与 complete（ok/deferred/failed）；扫描依赖失败为 scan/failed |
-| `recovery` | 每条待恢复凭据的阶段与 `recovery` 结果；成功 `deleted` / `unmoved`，失败 `failed` |
+| `recovery` | 每条待恢复凭据的阶段与 `recovery` 结果；兼容结果名 `deleted` 现表示日志已移走或旧凭据确认已不在、`unmoved` 表示未移动，失败 `failed` |
 | `log-rotate` | 成功 `complete/ok`；`reason` 含文件序号、保留范围、实际淘汰文件或 none 和阈值；失败按实际步骤（含序号）降级 logger |
 
-purge 成功阶段覆盖 `gate/locked/recheck/intent/renamed/unlocked/logs-deleted/delete-staged/detach/unarchive/marker/removed/projection`，幽灵记录使用独立的 `logs-absent`；
+purge 成功阶段覆盖 `gate/locked/recheck/intent/moved-to-trash/unlocked/detach/unarchive/marker/removed/projection`，幽灵记录使用独立的 `logs-absent`；
 工作区 detach 每次实际尝试各记一条，不为非成员或零归属伪造 detach 行；日志行数不固定。
 `unlocked/ok` 仅在真正取得租约且 `release()` 成功后写入；取锁失败不产生 `locked` 或 `unlocked` 行。
-lock-busy 排队路径为 `gate/ok → lock/failed → deferred/ok → complete/deferred`，deferred 的 reason 含 busy 原因；排队写入失败则 `deferred/failed → complete/failed`，正常成功的 `renamed → unlocked → logs-deleted` 顺序不变。
+lock-busy 排队路径为 `gate/ok → lock/failed → deferred/ok → complete/deferred`，deferred 的 reason 含 busy 原因；排队写入失败则 `deferred/failed → complete/failed`，正常成功为 `moved-to-trash → unlocked → detach（如有）`。旧 `renamed / logs-deleted / delete-staged` 审计阶段**已废弃**，仅历史日志保留。
 失败按实际阶段记录，缓存清理失败为 `projection/warning`。
-每条追加尝试都会等待完成；rename 事件在测试 SIGKILL 前已写出。日志不是业务提交凭据，
+每条追加尝试都会等待完成；moved-to-trash 事件在测试 SIGKILL 前已写出。日志不是业务提交凭据，
 也没有断电级 fsync 保证。任意定位、轮转、创建、打开、追加、关闭失败均不改变主操作结果，
 只降级 `ctx.logger.info`，携带原记录与 `logError`；降级 logger 自身抛错也会吞掉，后续记录仍可重试。轮转失败时轮转记录与原业务记录分别降级；不把业务成功改为失败，也不替换原业务异常。磁盘失败仍不承诺每条落盘。
 Client 不展示操作日志，`listTrash` 读取/对账不额外写操作记录。
@@ -202,7 +204,7 @@ cat '/实际的 DSH home/logs/trash.log.3' '/实际的 DSH home/logs/trash.log.2
 | `sidebar.workspaces.session.menu.item` | id=`trash-menu` | 350 | 收进菜单项 |
 | `sidebar.workspaces.session.row.action` | id=`trash-action` | 50 | hover 垃圾桶、Tooltip、aria-label |
 | `sidebar.panellist` | id=`trash` | 40 | 回收站图标，label 为读取当前 locale 的 thunk |
-| `main` | key=`trash` | — | 全局列表、恢复、物理删除、清空、内联确认、空/加载/错误态 |
+| `main` | key=`trash` | — | 全局列表、恢复、移入系统回收站、清空、内联确认、空/加载/错误态 |
 
 入口 id 与 main key 配对，由 sidebar owner 导航。菜单项位于原生 Archive 之前，
 hover 的 50 位于原生 Archive 100/Pin 200 之前，不替换内置条目。
@@ -254,15 +256,14 @@ Client 先 `await ctx.remote.$mount(contribution)`，再 `ctx.get('remote.trash'
 新增 13 项 `deferred-regressions.mjs`（Node 与 discovery 均执行）覆盖真实锁排队/时间与 inode 保留、重启完成/仍忙、恢复取消、非 lock EBUSY、purge 凭据优先、empty 混合汇总、排队落盘失败、真实 Cordis init、stat/domain 就绪重试及卸载。Client 另验证双语行/status、精确前缀、RemoteResult/transport 与取消排队保留行。
 
 `npm test` 覆盖 Host 操作/补偿/串行化、Remote codecs、共享面板、响应倒序、文案及资源清理，
-以及合成临时 home 上的真实 flock/rename/rm、外部锁竞争、SIGKILL 后恢复、失败重试和 restore 回归。
+以及合成临时 home 上的真实写租约及临时目录 move、外部锁竞争、SIGKILL 后恢复、失败重试和 restore 回归。
 `npm run test:discovery` 需设置 `DSH_NODE_EXECUTABLE` 为安装版 Electron 可执行文件的绝对路径，
 `DSH_INSTALL_DIR` 为安装版 `@deepseek-ai/dsh` 包目录；使用安装版 Electron，覆盖 resolver、Loader、Gateway 注入与实际 slot RPC，
 并运行真实 Registry、DomainFacility、WorkspaceFeed、ClientWorkspaceModel 的隔离交错复现。
-旧协议/UI回归明确使用 `legacy-purge-seam.cjs` 隔离文件 I/O；第 4 期文件系统套件不替换锁/rename/rm，
-只替换 persistence stat 的合成元数据、工作区服务与故障时机，Domain 使用真实 facility 与临时文件介质。
+旧协议/UI回归明确使用 `legacy-purge-seam.cjs` 隔离文件 I/O；第 4 期文件系统套件已适配 5.2，不替换原生写租约；注入的 SystemTrash 将源 rename 到临时模拟回收站，替换 persistence stat 的合成元数据、工作区服务与故障时机，Domain 使用真实 facility 与临时文件介质。新增 14 项 system-trash 专项覆盖新旧凭据、跨卷拒绝、源替换、空成功、移动前后中断和清空混合汇总；其中 macOS 原生 rename 仅使用注入的临时用户 home。
 同一套 37 个文件系统场景（原 34 + 定向 detach/无归属/多归属失败重试 3 项）也由 discovery 在安装版 Electron 下执行；
 另以安装版 WorkspaceEntity 核对只清实际成员的持久记录。夹具默认删除环境变量 `DSH_HOME`；
-覆盖无变量时删除日志和投影、错误变量不重定向删除/恢复/投影，以及层级过深/过浅和各级 symlink 拒绝。
+覆盖无变量时移走日志和清投影、错误变量不重定向删除/恢复/投影，以及层级过深/过浅和各级 symlink 拒绝。
 SIGKILL 回归按真实两层目录枚举规则验证重启前后残留不可发现、其它会话仍可见；
 另有点目录正向对照、非法 intent/recovery 拒绝及无凭据暂存保留断言。trash transport 不直接修改 Client 归档集合。
 这不等同于真实 React renderer 或真实 profile GUI 验收。
@@ -272,9 +273,9 @@ SIGKILL 回归按真实两层目录枚举规则验证重启前后残留不可发
 队列失败后重试、symlink 拒绝、无可靠 home 降级，以及跨 Host 操作/多个 logger 实例/两个子进程并发追加。
 新增 8 项使用实际 4 MiB 阈值验证边界与下一次追加轮转、KEEP 淘汰、逐行完整保留、归档 symlink 拒绝、
 轮转失败与建新文件失败不改变业务结果及重试、guard 忙时降级、两个子进程加四实例并发轮转逐行核对，以及跨进程旧句柄迟到写入 `.1`。
-全部 37 个文件系统场景也逐条核对 Host report 已落盘，SIGKILL 回归额外核对 `renamed` 记录仍在磁盘。
+全部 37 个文件系统场景也逐条核对 Host report 已落盘，SIGKILL 回归额外核对 `moved-to-trash` 记录仍在磁盘。
 
-公开包身份为 `d-trash@0.1.0`，MIT，目标仓库 `HLhhh/d-trash`；版本不对应期号。locale 的 `meta.detail` 指向此文档，packed 文件包含 PLAN、
+公开包身份为 `d-trash@0.2.0`，MIT，目标仓库 `HLhhh/d-trash`；版本不对应期号。locale 的 `meta.detail` 指向此文档，packed 文件包含 PLAN、
 docs、双语 README、LICENSE、CHANGELOG、locale、icon、patch 和运行产物；`dist/` 随仓库提交，`CODEX_*.md` 仅本地保留。
 Cordis peer 为 `^4.1.0`，DSH peers 为 `^0.2.2-rc.2`，node-addon-system peer 为 `^0.1.2`；开发依赖保持精确，
 Node 要求 `^22.19.0 || >=24.0.0`。这些声明区间不代表后续 DSH 版本已验证。Client id 复用 manifest 生成的 contribution.package；测试和夹具读取 manifest.name。
@@ -300,13 +301,13 @@ POSIX 的 inode 锁随 rename 移动，Windows 的路径名锁留在原路径；
 但对各平台 backend 写者的排他协议相同，不宣称跨进程维护事务。
 
 Windows rename 对 EBUSY/EPERM/EACCES/ENOTEMPTY 最多 5 次，每次重试重新验证 stat、dev/ino、
-canonical path、租约、归档门禁和 target 不存在；不覆盖冲突目标，不跨卷复制。rm 有界重试并复核暂存身份；
+canonical path、租约与归档+marker 门禁；macOS 排他移动不覆盖目标，Windows 系统分配目标；不跨卷复制。系统移动有界重试，旧暂存凭据复核身份后也只移动；
 耗尽重试保留 intent/deleting，供下次 purge/empty 恢复。Windows 使用 realpath/lstat 与非零 ino 验证，
 不依赖 O_NOFOLLOW 支持；POSIX 继续使用 O_NOFOLLOW。盘符/路径大小写可比对，junction/symlink 仍拒绝。
 
 测试通过数和 SKIP 分开输出。Windows 跳过原 POSIX symlink/O_NOFOLLOW、缺锁拒绝、SIGKILL 场景和 mode 位断言，
-另跑无锁文件、命名信号量竞争/大小写、终止进程释放、junction 拒绝、rename/rm 重试及审计用例。
-macOS 跳过明确要求 Windows 的 6 项，不把注入错误的策略单元测试当作 Windows 原生验收。维护者已于 2026-11-25 在原生 Windows 的 DSH 桌面 GUI 验证通过删除全流程（安装、侧栏入口、收进、恢复、彻底删除、清空）；这 6 项原生用例仍留待 Windows 上执行。
+另跑无锁文件、命名信号量竞争/大小写、终止进程释放、junction 拒绝、注入移动的 sharing 重试及审计用例。
+macOS 跳过明确要求 Windows 的 6 项，不把注入错误的策略单元测试当作 Windows 原生验收。维护者已于 2026-11-25 在原生 Windows 的 DSH 桌面 GUI 验证通过第 4 期删除全流程（安装、侧栏入口、收进、恢复、彻底删除、清空）；该历史验收不覆盖 5.2 系统回收站；这 6 项原生用例和 5.2 Windows Shell 真机验收仍待执行。
 
 <a id="windows-self-check"></a>
 ## Windows self-check
@@ -323,12 +324,11 @@ npm test 2>&1 | Tee-Object platform-test.log
 if ($LASTEXITCODE -ne 0) { throw 'tests failed; return platform-test.log' }
 npm run test:discovery 2>&1 | Tee-Object platform-discovery.log
 if ($LASTEXITCODE -ne 0) { throw 'discovery failed; return platform-discovery.log' }
-npm pack --dry-run --json
+npm pack --dry-run --json --cache "$env:TEMP\d-trash-p52-npm-cache"
 if ($LASTEXITCODE -ne 0) { throw 'pack failed' }
 ```
 
-预期 build 输出 Typert / Client generated/bundled；npm test 输出平台 10 passed/0 skipped、phase4 27 passed/10 skipped、
-日志 27 passed/3 skipped（每个 SKIP 带 POSIX 原因），幽灵记录 18 passed/0 skipped、排队 13 passed/0 skipped，重新显示修复 14 passed/0 skipped，其余 Host/Client/生成器通过，退出码 0。
+预期 build 输出 Typert / Client generated/bundled；npm test 的平台、system-trash、phase4、日志、幽灵记录、排队、重新显示、Host/Client/生成器套件均输出 PASS，退出码 0。仅平台不适用的 POSIX/macOS 用例可带明确原因 SKIP；5.2 Windows 原生专属用例本轮未执行，不把预计数量当作真机结果。
 无安装版变量时 discovery 明确输出 SKIP，不算 discovery 通过。若已安装 DSH，可仅设置以下两个路径再运行；
 runner 负责 ELECTRON_RUN_AS_NODE、等待 GUI 子系统 Electron 退出和转发输出，无需修改 profile：
 
@@ -341,6 +341,29 @@ if ($LASTEXITCODE -ne 0) { throw 'discovery failed' }
 
 有效 discovery 应输出 runtime 中的 electron/node/dsh、official-lease-import 的明确结果，
 official-lease-mutual-exclusion 的 bothDirections/reacquire=true、四个 slot/Gateway 证据和最终 PASS，
-不能只有 SKIP。pack 应列出 d-trash、dist/write-lease.js、dist/fs-retry.js 与所需资源，无 CODEX 报告。
+不能只有 SKIP。pack 应列出 d-trash、dist/write-lease.js、dist/fs-retry.js、dist/system-trash.js 与所需资源，无 CODEX 报告。
 失败时回传两份 platform 日志、命令退出码、node --version、npm --version、Windows 版本与 CPU 架构；
 不要回传真实会话内容。保留失败原文；不跳过锁竞争/路径门禁来获得绿色结果。
+
+<a id="p52-manual-acceptance"></a>
+## 5.2 系统回收站真机验证步骤（尚未执行）
+
+本轮只运行临时目录隔离回归，未写真实 `~/.Trash` / Windows 回收站、未安装插件、未改 profile、未碰真实会话。历史第 4 期 Windows GUI 验收不覆盖本次语义。以下操作由维护者在明确授权的测试环境手动完成，使用新建的无价值会话，保留原 source 路径；不要用日常真实会话试验。
+
+macOS：
+
+1. 在专用测试环境启用构建后的 bundle，创建两个仅含测试文本的会话，收进插件回收站；确认普通恢复仍保留日志及归属。
+2. 对一个未占用的测试会话点「移入系统回收站」，确认说明包含系统恢复；应全程没有 TCC/Finder 自动化授权弹窗。操作若被权限拒绝，应保留源及 purgePending，不通过 Finder/osascript 重试。
+3. 核对原 `sessions` 下目录消失，系统废纸篓出现 `d-trash-<uuid>` 目录，内含全部日志代际与 `session.lock`；原生归档、所属工作区、marker 与磁盘投影记录均已清理。审计为 moved-to-trash→unlocked→detach（如有）→unarchive→marker→removed→projection→complete，无旧三阶段。
+4. 系统废纸篓不保证「放回原处」；可用系统操作将目录手动移回所记原 source 路径，验证内容仍在。系统恢复不自动补回被清的归档/工作区/marker，重新发现依赖 DSH 现有机制。
+5. 加载另一个测试会话持锁后清空，确认 busy 排队不移动；重启 DSH 后按原队列规则重试。对多个无锁测试条目清空，检查逐项移动及成功/排队/失败汇总。可在专用测试卷放置合成 home，与用户废纸篓不同卷时应明确拒绝、源完整；不为验证创建或删除日常会话。
+
+Windows：
+
+1. 在专用测试用户/测试环境运行 build/test/discovery（见 Windows self-check）；仅经另行授权启用 bundle，创建两个测试会话，记下原目录。确保源在固定本地卷且该卷回收站可用，记录系统回收站策略和可用容量。
+2. 单条「移入系统回收站」后核对原目录消失，系统回收站显示目录与原始位置信息；无确认/错误/进度弹窗。用系统「还原」验证内容回到原 source。插件已清记录不会自动补回。
+3. 测试同名目录的两条会话（不同 project），检查系统能区分并各自还原，不要求或推算 `$R…` 的实际目标名。测试含中文/空格路径；超长路径、UNC、可移动盘及挂载别名应拒绝并保留源。
+4. 打开一个测试会话制造真实 backend 信号量占用，确认排队及下次启动重试；另用短暂 deny-delete 句柄确认有界重试、每次复核门禁，耗尽后保留凭据，再次操作可完成。
+5. 批量清空确认分项结果；在隔离程序内模拟 Shell 返回非零/aborted，源在则重新过门禁，源不在则仅清记录。不要用真实业务目录进行断电/强杀测试。旧 staging/崩溃协议继续由合成临时 home 回归验证。
+
+回传 OS/CPU、Node/Electron/DSH 版本、退出码、系统回收站可见性/还原结果、是否出现授权/UI、审计阶段与原因即可；不回传会话正文。不要把仅 SKIP 的 discovery 或历史 GUI 验收写成 5.2 真机通过。
