@@ -59,7 +59,8 @@
     "README.md",
     "README_zh.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "CHANGELOG_zh.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/generate-typert.mjs && node scripts/build-client.mjs",
