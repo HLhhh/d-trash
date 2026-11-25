@@ -43,7 +43,14 @@
       physicalDeletion: "Physical deletion permanently removes local session logs and cannot be undone.",
       purgePending: "Deletion is unfinished. Retry physical deletion to complete cleanup.",
       deferred: "Pending deletion (automatically completes after restarting DSH)",
-      deferredNotice: "Queued for deletion. Restart DSH to complete it; Restore cancels the queue. {reason}"
+      deferredNotice: "Queued for deletion. Restart DSH to complete it; Restore cancels the queue. {reason}",
+      sessionId: "Session ID",
+      copyId: "Copy ID",
+      copied: "Copied",
+      copyFailed: "Could not copy ID: {reason}",
+      clipboardUnavailable: "Clipboard access is unavailable in this context.",
+      copyErrorUnknown: "Clipboard write failed without an error message.",
+      copyManually: "Full ID selected below. Press Cmd/Ctrl+C to copy."
     }
   };
 
@@ -81,7 +88,14 @@
       physicalDeletion: "\u7269\u7406\u5220\u9664\u5C06\u6C38\u4E45\u79FB\u9664\u672C\u5730\u4F1A\u8BDD\u65E5\u5FD7\uFF0C\u4E0D\u53EF\u6062\u590D\u3002",
       purgePending: "\u5220\u9664\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u7269\u7406\u5220\u9664\u4EE5\u5B8C\u6210\u6E05\u7406\u3002",
       deferred: "\u5F85\u5220\u9664\uFF08\u91CD\u542F DSH \u540E\u81EA\u52A8\u5B8C\u6210\uFF09",
-      deferredNotice: "\u5DF2\u6392\u961F\u3002\u91CD\u542F DSH \u540E\u81EA\u52A8\u5B8C\u6210\uFF1B\u6062\u590D\u53EF\u53D6\u6D88\u6392\u961F\u3002{reason}"
+      deferredNotice: "\u5DF2\u6392\u961F\u3002\u91CD\u542F DSH \u540E\u81EA\u52A8\u5B8C\u6210\uFF1B\u6062\u590D\u53EF\u53D6\u6D88\u6392\u961F\u3002{reason}",
+      sessionId: "\u4F1A\u8BDD ID",
+      copyId: "\u590D\u5236 ID",
+      copied: "\u5DF2\u590D\u5236",
+      copyFailed: "\u590D\u5236 ID \u5931\u8D25\uFF1A{reason}",
+      clipboardUnavailable: "\u5F53\u524D\u73AF\u5883\u65E0\u6CD5\u8BBF\u95EE\u526A\u8D34\u677F\u3002",
+      copyErrorUnknown: "\u526A\u8D34\u677F\u5199\u5165\u5931\u8D25\uFF0C\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\u3002",
+      copyManually: "\u4E0B\u65B9\u5DF2\u9009\u4E2D\u5B8C\u6574 ID\uFF0C\u8BF7\u6309 Cmd/Ctrl+C \u590D\u5236\u3002"
     }
   };
 
@@ -288,7 +302,18 @@
   .trash-panel .trash-danger { color:var(--dsw-alias-state-error-primary); }
   .trash-panel-list { list-style:none; padding:0; margin:16px 0; }
   .trash-panel-row { border-bottom:1px solid var(--dsw-alias-border-l2); padding:16px 0; }
-  .trash-panel-title { margin:0 0 8px; font-size:15px; overflow-wrap:anywhere; }
+  .trash-panel-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+    gap:4px 8px; margin-bottom:8px; min-width:0; }
+  .trash-panel-title { margin:0; min-width:0; font-size:15px; overflow-wrap:anywhere; }
+  .trash-session-id { min-width:0; max-width:100%; font-size:12px; color:var(--dsw-alias-label-tertiary); }
+  .trash-session-id-line { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
+  .trash-session-id code { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:monospace; }
+  .trash-session-id .trash-copy-id { flex:none; padding:2px 6px; font-size:12px; }
+  .trash-session-id input { display:block; box-sizing:border-box; width:100%; min-width:0; margin-top:4px;
+    border:1px solid var(--dsw-alias-border-l2); border-radius:4px; padding:3px 5px;
+    background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:12px monospace; }
+  .trash-session-id-feedback { display:block; overflow-wrap:anywhere; }
+  .trash-session-id-failure { color:var(--dsw-alias-state-error-primary); }
   .trash-panel-meta, .trash-panel-note { color:var(--dsw-alias-label-tertiary); font-size:13px; overflow-wrap:anywhere; }
   .trash-panel-confirm { margin:12px 0; padding:12px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; }
   .trash-panel-state { padding:40px 0; text-align:center; color:var(--dsw-alias-label-tertiary); }
@@ -331,6 +356,100 @@
           if (!result.ok) throw new Error(result.error.message);
           return result.value;
         }
+        function selectFullId(input2) {
+          if (input2) {
+            input2.focus();
+            input2.select();
+          }
+        }
+        function SessionIdentifier({ sessionId, t }) {
+          const [copied, setCopied] = React.useState(false);
+          const [copying, setCopying] = React.useState(false);
+          const [fallback, setFallback] = React.useState(null);
+          const timer = React.useRef(void 0);
+          const busy = React.useRef(false);
+          const generation = React.useRef(0);
+          React.useEffect(() => {
+            generation.current++;
+            return () => {
+              generation.current++;
+              window.clearTimeout(timer.current);
+              timer.current = void 0;
+            };
+          }, [sessionId]);
+          const copyId = async () => {
+            if (busy.current) return;
+            busy.current = true;
+            const token = generation.current;
+            window.clearTimeout(timer.current);
+            timer.current = void 0;
+            setCopied(false);
+            setCopying(true);
+            setFallback(null);
+            try {
+              const clipboard = window.navigator?.clipboard;
+              if (typeof clipboard?.writeText !== "function") {
+                setFallback({});
+                return;
+              }
+              await clipboard.writeText(sessionId);
+              if (token !== generation.current) return;
+              setCopied(true);
+              timer.current = window.setTimeout(() => {
+                timer.current = void 0;
+                setCopied(false);
+              }, 1500);
+            } catch (reason) {
+              if (token === generation.current) setFallback({ reason: errorMessage(reason) });
+            } finally {
+              busy.current = false;
+              if (token === generation.current) setCopying(false);
+            }
+          };
+          return h(
+            "div",
+            { className: "trash-session-id" },
+            h(
+              "div",
+              { className: "trash-session-id-line" },
+              h(
+                "code",
+                { title: sessionId, "aria-label": `${t("sessionId")}: ${sessionId}` },
+                sessionId.length > 12 ? `\u2026${sessionId.slice(-12)}` : sessionId
+              ),
+              h("button", {
+                type: "button",
+                className: "trash-copy-id",
+                title: t("copyId"),
+                "aria-label": t("copyId"),
+                disabled: copying,
+                onClick: () => {
+                  void copyId();
+                }
+              }, t("copyId")),
+              copied && h("span", { role: "status" }, t("copied"))
+            ),
+            fallback && h(
+              "div",
+              null,
+              h(
+                "span",
+                { className: "trash-session-id-feedback trash-session-id-failure", role: "alert" },
+                t("copyFailed", { reason: "reason" in fallback ? fallback.reason?.trim() || t("copyErrorUnknown") : t("clipboardUnavailable") })
+              ),
+              h("span", { className: "trash-session-id-feedback" }, t("copyManually")),
+              h("input", {
+                type: "text",
+                readOnly: true,
+                value: sessionId,
+                title: sessionId,
+                "aria-label": t("sessionId"),
+                ref: selectFullId,
+                onFocus: (event) => event.currentTarget.select()
+              })
+            )
+          );
+        }
         function TrashRow(props) {
           const { t, sessionId, record: record2 } = props;
           const liveTitle = props.useSessions((state) => {
@@ -344,7 +463,12 @@
           return h(
             "li",
             { className: "trash-panel-row" },
-            h("h2", { className: "trash-panel-title", title: sessionId }, title),
+            h(
+              "div",
+              { className: "trash-panel-heading" },
+              h("h2", { className: "trash-panel-title", title: sessionId }, title),
+              h(SessionIdentifier, { sessionId, t })
+            ),
             h(
               "p",
               { className: "trash-panel-meta" },

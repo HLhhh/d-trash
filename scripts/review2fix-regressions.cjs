@@ -132,7 +132,8 @@ module.exports = async function review2fix(installed, emit, evidence) {
       slots.set(options.name === 'main' ? 'trash-main' : options.id, { options, component })
     } })
     let definition
-    vm.runInNewContext(bundle, { window: { __ModuleLoader__: { load(value) { definition = value } } }, AbortController })
+    vm.runInNewContext(bundle, { window: { setTimeout, clearTimeout,
+      __ModuleLoader__: { load(value) { definition = value } } }, AbortController })
     const harness = require('./client-harness.cjs')((key, values = {}) => Object.entries(values).reduce(
       (value, [key, replacement]) => value.replace(`{${key}}`, replacement), dictionaries.en[key]))
     const fiber = ui.plugin(definition.factory(() => harness.React))

@@ -31,6 +31,13 @@
     "physicalDeletion": "物理删除将永久移除本地会话日志，不可恢复。",
     "purgePending": "删除尚未完成，请重试物理删除以完成清理。",
     "deferred": "待删除（重启 DSH 后自动完成）",
-    "deferredNotice": "已排队。重启 DSH 后自动完成；恢复可取消排队。{reason}"
+    "deferredNotice": "已排队。重启 DSH 后自动完成；恢复可取消排队。{reason}",
+    "sessionId": "会话 ID",
+    "copyId": "复制 ID",
+    "copied": "已复制",
+    "copyFailed": "复制 ID 失败：{reason}",
+    "clipboardUnavailable": "当前环境无法访问剪贴板。",
+    "copyErrorUnknown": "剪贴板写入失败，未提供错误信息。",
+    "copyManually": "下方已选中完整 ID，请按 Cmd/Ctrl+C 复制。"
   }
 }

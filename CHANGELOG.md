@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Trash rows now show a compact monospace session ID with the full ID on hover and one-click copying. Clipboard failures show a readable reason and select the full ID in a read-only field for manual copying. English/Chinese feedback, full IDs (including `im-link:` IDs), fallback, timed confirmation and unmount cleanup are covered by Client regressions; Host APIs and deletion behavior are unchanged.
+
 ### Changed
 
 - Documentation: the Windows GUI delete flow is recorded as maintainer-verified on 2026-11-25 (install, sidebar entry, Move to Trash, Restore, Delete forever and Empty Trash on native Windows). The six Windows-only native regression cases and the rc.2 Desktop GUI remain unrun; the compatibility tables, plan and project notes state that boundary.

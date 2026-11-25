@@ -97,13 +97,14 @@ failArchive = false
 
 let definition
 const timers = new Map()
+const timerDelays = new Map()
 const listeners = new Set()
 let timerId = 0
 const browser = {
   innerWidth: 1024,
   __ModuleLoader__: { load(value) { definition = value } },
-  setTimeout(callback) { timers.set(++timerId, callback); return timerId },
-  clearTimeout(id) { timers.delete(id) },
+  setTimeout(callback, delay) { timers.set(++timerId, callback); timerDelays.set(timerId, delay); return timerId },
+  clearTimeout(id) { timers.delete(id); timerDelays.delete(id) },
   addEventListener(name, fn) { listeners.add(fn) },
   removeEventListener(name, fn) { listeners.delete(fn) },
 }
@@ -281,6 +282,7 @@ assert.equal(timers.size, 0)
 assert.equal(listeners.size, 0)
 await (await import('./client-panel-regressions.mjs')).runPanelRegressions({
   entries, mount, find, tick, records, archived, panelCalls, panelFailures,
+  browser, timers, timerDelays,
   clientArchived, clientArchiveCalls, clientArchiveControl, hostRemote: uiContext.get('remote.trash'),
   setLanguage(value) { language = value },
 })

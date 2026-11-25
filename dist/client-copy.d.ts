@@ -28,6 +28,13 @@ export declare const copy: {
         purgePending: string;
         deferred: string;
         deferredNotice: string;
+        sessionId: string;
+        copyId: string;
+        copied: string;
+        copyFailed: string;
+        clipboardUnavailable: string;
+        copyErrorUnknown: string;
+        copyManually: string;
     };
     zh: {
         moveToTrash: string;
@@ -57,6 +64,13 @@ export declare const copy: {
         purgePending: string;
         deferred: string;
         deferredNotice: string;
+        sessionId: string;
+        copyId: string;
+        copied: string;
+        copyFailed: string;
+        clipboardUnavailable: string;
+        copyErrorUnknown: string;
+        copyManually: string;
     };
 };
 export type CopyKey = keyof typeof copy.en;

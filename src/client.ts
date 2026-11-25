@@ -129,7 +129,18 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
   .trash-panel .trash-danger { color:var(--dsw-alias-state-error-primary); }
   .trash-panel-list { list-style:none; padding:0; margin:16px 0; }
   .trash-panel-row { border-bottom:1px solid var(--dsw-alias-border-l2); padding:16px 0; }
-  .trash-panel-title { margin:0 0 8px; font-size:15px; overflow-wrap:anywhere; }
+  .trash-panel-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+    gap:4px 8px; margin-bottom:8px; min-width:0; }
+  .trash-panel-title { margin:0; min-width:0; font-size:15px; overflow-wrap:anywhere; }
+  .trash-session-id { min-width:0; max-width:100%; font-size:12px; color:var(--dsw-alias-label-tertiary); }
+  .trash-session-id-line { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
+  .trash-session-id code { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:monospace; }
+  .trash-session-id .trash-copy-id { flex:none; padding:2px 6px; font-size:12px; }
+  .trash-session-id input { display:block; box-sizing:border-box; width:100%; min-width:0; margin-top:4px;
+    border:1px solid var(--dsw-alias-border-l2); border-radius:4px; padding:3px 5px;
+    background:var(--dsw-alias-bg-base); color:var(--dsw-alias-label-primary); font:12px monospace; }
+  .trash-session-id-feedback { display:block; overflow-wrap:anywhere; }
+  .trash-session-id-failure { color:var(--dsw-alias-state-error-primary); }
   .trash-panel-meta, .trash-panel-note { color:var(--dsw-alias-label-tertiary); font-size:13px; overflow-wrap:anywhere; }
   .trash-panel-confirm { margin:12px 0; padding:12px; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; }
   .trash-panel-state { padding:40px 0; text-align:center; color:var(--dsw-alias-label-tertiary); }
@@ -174,6 +185,73 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
         onCancel: () => void
       }
 
+      // Stable ref: unrelated row rerenders must not steal focus back to the input.
+      function selectFullId(input: HTMLInputElement | null): void {
+        if (input) { input.focus(); input.select() }
+      }
+
+      function SessionIdentifier({ sessionId, t }: { sessionId: SessionId; t: Translate }): Element {
+        const [copied, setCopied] = React.useState(false)
+        const [copying, setCopying] = React.useState(false)
+        const [fallback, setFallback] = React.useState<{ reason?: string } | null>(null)
+        const timer = React.useRef<number | undefined>(undefined)
+        const busy = React.useRef(false)
+        const generation = React.useRef(0)
+        React.useEffect(() => {
+          generation.current++
+          return () => {
+            generation.current++
+            window.clearTimeout(timer.current)
+            timer.current = undefined
+          }
+        }, [sessionId])
+        const copyId = async (): Promise<void> => {
+          if (busy.current) return
+          busy.current = true
+          const token = generation.current
+          window.clearTimeout(timer.current)
+          timer.current = undefined
+          setCopied(false)
+          setCopying(true)
+          setFallback(null)
+          try {
+            const clipboard = window.navigator?.clipboard
+            if (typeof clipboard?.writeText !== 'function') {
+              setFallback({})
+              return
+            }
+            await clipboard.writeText(sessionId)
+            if (token !== generation.current) return
+            setCopied(true)
+            timer.current = window.setTimeout(() => {
+              timer.current = undefined
+              setCopied(false)
+            }, 1500)
+          } catch (reason: unknown) {
+            if (token === generation.current) setFallback({ reason: errorMessage(reason) })
+          } finally {
+            busy.current = false
+            if (token === generation.current) setCopying(false)
+          }
+        }
+        return h('div', { className: 'trash-session-id' },
+          h('div', { className: 'trash-session-id-line' },
+            h('code', { title: sessionId, 'aria-label': `${t('sessionId')}: ${sessionId}` },
+              sessionId.length > 12 ? `…${sessionId.slice(-12)}` : sessionId),
+            h('button', { type: 'button', className: 'trash-copy-id', title: t('copyId'),
+              'aria-label': t('copyId'), disabled: copying,
+              onClick: () => { void copyId() } }, t('copyId')),
+            copied && h('span', { role: 'status' }, t('copied'))),
+          fallback && h('div', null,
+            h('span', { className: 'trash-session-id-feedback trash-session-id-failure', role: 'alert' },
+              t('copyFailed', { reason: 'reason' in fallback
+                ? fallback.reason?.trim() || t('copyErrorUnknown') : t('clipboardUnavailable') })),
+            h('span', { className: 'trash-session-id-feedback' }, t('copyManually')),
+            h('input', { type: 'text', readOnly: true, value: sessionId, title: sessionId,
+              'aria-label': t('sessionId'), ref: selectFullId,
+              onFocus: (event: { currentTarget: HTMLInputElement }) => event.currentTarget.select() })))
+      }
+
       function TrashRow(props: TrashRowProps): Element {
         const { t, sessionId, record } = props
         // Each row owns its selector hook, so list length/order never changes
@@ -190,7 +268,9 @@ export default function registerTrashClient(contribution: TypertRemoteContributi
         const date = new Date(record.trashedAt)
         const validDate = !Number.isNaN(date.getTime())
         return h('li', { className: 'trash-panel-row' },
-          h('h2', { className: 'trash-panel-title', title: sessionId }, title),
+          h('div', { className: 'trash-panel-heading' },
+            h('h2', { className: 'trash-panel-title', title: sessionId }, title),
+            h(SessionIdentifier, { sessionId, t })),
           h('p', { className: 'trash-panel-meta' },
             h('time', { dateTime: validDate ? date.toISOString() : undefined },
               t('trashedAt', { time: validDate ? date.toLocaleString(props.getLocale()) : t('unknownTime') }))),

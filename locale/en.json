@@ -31,6 +31,13 @@
     "physicalDeletion": "Physical deletion permanently removes local session logs and cannot be undone.",
     "purgePending": "Deletion is unfinished. Retry physical deletion to complete cleanup.",
     "deferred": "Pending deletion (automatically completes after restarting DSH)",
-    "deferredNotice": "Queued for deletion. Restart DSH to complete it; Restore cancels the queue. {reason}"
+    "deferredNotice": "Queued for deletion. Restart DSH to complete it; Restore cancels the queue. {reason}",
+    "sessionId": "Session ID",
+    "copyId": "Copy ID",
+    "copied": "Copied",
+    "copyFailed": "Could not copy ID: {reason}",
+    "clipboardUnavailable": "Clipboard access is unavailable in this context.",
+    "copyErrorUnknown": "Clipboard write failed without an error message.",
+    "copyManually": "Full ID selected below. Press Cmd/Ctrl+C to copy."
   }
 }

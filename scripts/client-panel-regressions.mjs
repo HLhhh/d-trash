@@ -4,7 +4,8 @@ import { SESSION_LOCK_BUSY_PREFIX, DEFERRED_PREFIX, TrashErrorCode } from '../di
 import { copy } from '../dist/client-copy.js'
 
 export async function runPanelRegressions({ entries, mount, find, tick, records, archived,
-  panelCalls, panelFailures, setLanguage, clientArchived, clientArchiveCalls, clientArchiveControl, hostRemote }) {
+  panelCalls, panelFailures, setLanguage, clientArchived, clientArchiveCalls, clientArchiveControl, hostRemote,
+  browser, timers, timerDelays }) {
   const sidebar = entries.get('trash')
   const panel = entries.get('trash-main')
   assert.equal(sidebar.options.name, 'sidebar.panellist')
@@ -235,6 +236,103 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   view.unmount()
   remote.listTrash = initialList
 
+  // Copy uses the full opaque ID, never the tail, title, or a colon-split ID.
+  records.clear()
+  const ids = ['short-id', '01234567-89ab-cdef-0123-456789abcdef', 'im-link:provider:channel:thread:0123456789abcdef']
+  ids.forEach((id, i) => seed(id, { titleSnapshot: `Copy row ${i}` }))
+  view = setup(); view.render(); await tick(); tree = view.render()
+  const copiedIds = []
+  browser.navigator = { clipboard: { async writeText(id) { copiedIds.push(id) } } }
+  const copyRow = (id, target = view) => find(target.render(), node => node.type === 'li'
+    && find(node, child => child.type === 'code' && child.props.title === id))
+  const copyButton = id => button(copyRow(id), copy.en.copyId)
+  const status = id => find(copyRow(id), node => node.props.role === 'status')
+  for (const id of ids) {
+    const code = find(copyRow(id), node => node.type === 'code')
+    assert.equal(text(code), id.length > 12 ? `…${id.slice(-12)}` : id)
+    assert.equal(code.props.title, id)
+    assert.equal(code.props['aria-label'], `${copy.en.sessionId}: ${id}`)
+    assert.equal(copyButton(id).props.title, copy.en.copyId)
+    assert.equal(copyButton(id).props['aria-label'], copy.en.copyId)
+    copyButton(id).props.onClick(); await tick()
+    assert.equal(text(status(id)), copy.en.copied)
+  }
+  assert.deepEqual(copiedIds, ids)
+  assert.equal(timers.size, 3, 'each row owns its own feedback timer')
+  assert.ok([...timerDelays.values()].every(delay => delay === 1500))
+  setLanguage('zh')
+  tree = copyRow(ids[2])
+  assert.equal(button(tree, copy.zh.copyId).props['aria-label'], copy.zh.copyId)
+  assert.equal(find(tree, node => node.type === 'code').props['aria-label'], `${copy.zh.sessionId}: ${ids[2]}`)
+  assert.equal(text(status(ids[2])), copy.zh.copied, 'existing feedback follows language changes')
+  setLanguage('en')
+  for (const [id, callback] of [...timers]) {
+    timers.delete(id); timerDelays.delete(id); callback()
+  }
+  ids.forEach(id => assert.equal(status(id), undefined, 'success feedback expires'))
+
+  // No API, no writeText, rejected permission, synchronous failure, and cross-realm errors.
+  for (const [navigator, reasonKey, detail] of [
+    [undefined, 'clipboardUnavailable'],
+    [{}, 'clipboardUnavailable'],
+    [{ clipboard: {} }, 'clipboardUnavailable'],
+    [{ clipboard: { async writeText() { throw new Error('Permission denied') } } }, null, 'Permission denied'],
+    [{ clipboard: { writeText() { throw { message: 'Clipboard blocked' } } } }, null, 'Clipboard blocked'],
+    [{ clipboard: { writeText() { throw new Error('') } } }, 'copyErrorUnknown'],
+  ]) {
+    browser.navigator = navigator
+    copyButton(ids[2]).props.onClick(); await tick()
+    for (const language of ['en', 'zh']) {
+      setLanguage(language)
+      tree = copyRow(ids[2])
+      const expected = copy[language].copyFailed.replace('{reason}', reasonKey ? copy[language][reasonKey] : detail)
+      assert.equal(text(find(tree, node => node.props.role === 'alert')), expected)
+      assert.ok(text(tree).includes(copy[language].copyManually))
+      const input = find(tree, node => node.type === 'input')
+      assert.equal(input.props.value, ids[2])
+      assert.equal(input.props.readOnly, true)
+      assert.equal(input.props['aria-label'], copy[language].sessionId)
+      let focused = false, selected = ''
+      const element = { value: input.props.value, focus() { focused = true }, select() { selected = this.value } }
+      input.props.ref(element)
+      assert.equal(focused, true)
+      assert.equal(selected, ids[2], 'fallback selects the complete ID')
+      selected = ''; input.props.onFocus({ currentTarget: element })
+      assert.equal(selected, ids[2], 'keyboard refocus selects the complete ID again')
+      input.props.ref(null)
+      assert.equal(find(tree, node => node.props.role === 'status'), undefined, 'manual selection is not copy success')
+    }
+    setLanguage('en')
+    assert.equal(timers.size, 0, 'failed writes must not start success timers')
+  }
+  assert.equal(find(copyRow(ids[0]), node => node.type === 'input'), undefined, 'fallback stays local to its row')
+  browser.navigator = { clipboard: { async writeText() {} } }
+  copyButton(ids[2]).props.onClick(); await tick()
+  assert.equal(find(copyRow(ids[2]), node => node.type === 'input'), undefined, 'retry success closes fallback')
+  copyButton(ids[2]).props.onClick(); await tick()
+  assert.equal(timers.size, 1, 'repeat copy replaces its previous timer')
+  view.unmount()
+  assert.equal(timers.size, 0, 'panel unmount clears row feedback timers')
+  assert.equal(view.lateUpdates, 0)
+
+  // Late completion after unmount creates neither feedback nor timers.
+  for (const reject of [false, true]) {
+    let finish
+    browser.navigator = { clipboard: { writeText: () => new Promise((resolve, fail) => {
+      finish = () => reject ? fail(new Error('Late denial')) : resolve()
+    }) } }
+    view = setup(); view.render(); await tick()
+    copyButton(ids[2]).props.onClick()
+    copyButton(ids[2]).props.onClick()
+    view.unmount(); finish(); await tick()
+    assert.equal(view.lateUpdates, 0)
+    assert.equal(timers.size, 0)
+  }
+  delete browser.navigator
+  records.clear()
+  panelCalls.length = 0
+  console.log('PASS: session ID full/tail display, opaque clipboard writes including im-link colons, selected read-only fallback, bilingual reasons/feedback, 1500ms expiry, retry and unmount cleanup')
+
   seed('snapshot', { titleSnapshot: 'Saved title', workspaceId: 'work-one', trashedAt: 1_700_000_000_100 })
   seed('catalog-title')
   seed('catalog-display')
@@ -252,7 +350,7 @@ export async function runPanelRegressions({ entries, mount, find, tick, records,
   assert.match(text(tree), /Workspace: Workspace One/)
   const time = find(row(tree, 'Saved title'), x => x.type === 'time')
   assert.equal(time.props.dateTime, new Date(1_700_000_000_100).toISOString())
-  assert.equal(all(tree, x => x.type === 'li')[0].children[0].children[0], 'Saved title')
+  assert.equal(text(find(all(tree, x => x.type === 'li')[0], x => x.type === 'h2')), 'Saved title')
   assert.ok(selectorIds.includes('catalog-title'))
   summaries['catalog-title'].title = 'Renamed title'
   assert.match(text(view.render()), /Renamed title/)
