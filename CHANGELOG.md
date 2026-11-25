@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Documentation: the Windows GUI delete flow is recorded as maintainer-verified on 2026-11-25 (install, sidebar entry, Move to Trash, Restore, Delete forever and Empty Trash on native Windows). The six Windows-only native regression cases and the rc.2 Desktop GUI remain unrun; the compatibility tables, plan and project notes state that boundary.
+
+### Changed
+
 - The changelog is now bilingual: `CHANGELOG.md` (English) and `CHANGELOG_zh.md` (简体中文) are maintained as one record with matching structure and order. Every change must add an `[Unreleased]` entry to both files; the release checklist (version bump, tag, GitHub Release) is recorded in `AGENTS.md`.
 
 ## [0.2.0] - 2026-11-25

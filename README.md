@@ -75,16 +75,16 @@ See [DETAIL.md](./docs/DETAIL.md) and [PLAN.md](./PLAN.md) for the full protocol
 | Cordis | Peer `^4.1.0` |
 | Native filesystem support | POSIX: `@deepseek-ai/node-addon-system` peer `^0.1.2`; Windows: bundled dependency `koffi` 3.1.1 |
 | Node.js | `^22.19.0 || >=24.0.0` |
-| Host platform | macOS regressions passed; Windows implementation included, native Windows acceptance pending user run |
+| Host platform | macOS: full isolation regressions. Windows: maintainer-verified in the DSH desktop GUI on 2026-11-25 (install, sidebar entry, Move to Trash, Restore, Delete forever, Empty Trash). The Windows-only native regression cases are not run yet. |
 | Session backend | JSONL only for permanent deletion; POSIX requires an existing lock file; Windows needs no lock file; unreliable paths/identity or unavailable native exclusion are rejected |
 
-No rc.2 Desktop GUI or Windows acceptance was performed in this run. [Windows self-check commands](./docs/DETAIL.md#windows-self-check) use temporary synthetic homes only.
+The Windows GUI delete flow was verified by the maintainer on 2026-11-25; the Windows-only native regressions and the rc.2 Desktop GUI were not run. [Windows self-check commands](./docs/DETAIL.md#windows-self-check) use temporary synthetic homes only.
 
 Peer ranges allow compatible updates; they do not mean later DSH versions have been tested. Recheck Client workspace projection and native locking after upgrading.
 
 ## Known limitations
 
-- Client removal notifications are best effort and are not replayed after disconnection. `removed/ok` confirms local emission, not Client receipt; an earlier throwing Host listener can prevent forwarding. The official catalog re-reads on reconnect. Native later re-additions, retained subagent lineage, and search synchronization remain DSH-owned. The new transport/catalog probe uses installed rc.5 with synthetic data; no GUI or Windows acceptance is claimed.
+- Client removal notifications are best effort and are not replayed after disconnection. `removed/ok` confirms local emission, not Client receipt; an earlier throwing Host listener can prevent forwarding. The official catalog re-reads on reconnect. Native later re-additions, retained subagent lineage, and search synchronization remain DSH-owned. The new transport/catalog probe uses installed rc.5 with synthetic data; the probe itself is not GUI or Windows acceptance.
 - Loaded/entered sessions can remain locked by DSH. Delete/Empty queues lock-busy sessions without changing their logs, archive state, or workspace membership. Restart DSH to let the Host retry automatically; if a session is still busy it stays queued for the next restart, and Delete forever can also retry manually. Startup maintenance runs in the background, retries unavailable services with backoff, and reports other errors by stage. There is no public unload/close API; the plugin never releases another owner’s handle, bypasses a lease, unlinks a live lock file, or steals a lock.
 - Attachments, workspace files, Git worktrees, artifacts, server logs, backups, and other plugins' snapshots remain.
 - Deletion is not secure erasure. Search results may take time to converge through DSH's existing synchronization; cache cleanup failures are warnings.

@@ -148,7 +148,7 @@ d-trash/
 1. **原生 UI 选项**：trash 仍在原生归档集合；「显示已归档 / 全部对话」模式仍能显示它，默认隐藏已归档时隐藏。不改原生按钮或过滤规则。
 2. **版本边界**：Workspace facade 类型只承诺读/订阅，实际 model 的 replace 能力已按安装版核实并运行时检查；升级 DSH 需重验。布局导航、Remote、storage 路由已解决，见附录。
 3. **并发边界**：插件队列不约束原生/其它进程；Workspace 跨通道帧可能瞬时闪烁，最终按只读权威基线收敛。写票据只覆盖同一 Client bundle，不是 Host revision 或跨 Client 协议。
-4. **物理删除范围**：已有日志仅 JSONL 且有可靠 stat/身份和 backend 兼容互斥。首次 stat 明确 undefined 且 marker/归档门禁成立时只清幽灵记录；stat 抛错或 snapshot 不可靠仍拒绝。POSIX 要求既有普通锁文件与官方 flock；Windows 同名信号量不要求锁文件。原生支持缺失或身份不可靠均拒绝。macOS 已隔离验证，Windows 待用户原生代跑。
+4. **物理删除范围**：已有日志仅 JSONL 且有可靠 stat/身份和 backend 兼容互斥。首次 stat 明确 undefined 且 marker/归档门禁成立时只清幽灵记录；stat 抛错或 snapshot 不可靠仍拒绝。POSIX 要求既有普通锁文件与官方 flock；Windows 同名信号量不要求锁文件。原生支持缺失或身份不可靠均拒绝。macOS 已隔离验证；Windows GUI 删除流程已由维护者真机验证（2026-11-25），Windows 专属原生回归用例尚未运行。
 5. **崩溃/升级**：覆盖进程崩溃，未增加断电级目录 fsync 事务。unknown-state 可隔离 domain，需重启读取凭据；pending 时不要降级旧版。非法或无凭据暂存不猜测删除。
 6. **派生数据**：投影删除失败为 warning，marker 可能已清掉，后续 purge 不保证自动重试缓存；索引依赖下一次稳定搜索观测的已有同步，不保证即时消失，不手改 SQLite。不额外清理其它插件快照。
 7. **日志**：best effort、固定 4 MiB 阈值与三份归档（下一次追加前轮转，约 16 MiB，非硬上限）；无可靠 stat/source 或磁盘失败时降级 logger，不能当业务凭据或承诺每条必落盘。
@@ -527,3 +527,9 @@ Host 的两条成功分支共用 `purgeSession`：确认日志已删除或首次
 ### 明确不做什么与剩余边界
 
 不改 DSH 核心/profile、不 install_bundle、不碰真实会话、不推送/发布；不使用私有接口，不卸载 Host/Client 会话，不绕锁、不改 deferred、不新增持久 schema。单向通知 best effort、不重放：连接中断、较早的 Host 监听器抛错可能阻断下发；重连由官方 catalog 全量读取收敛，原生后续 re-add/重建不属于本通知能禁止的行为。普通会话行移除不等于销毁所有驻留实例；subagent 的 lineage 保留逻辑仍由官方 manager 控制。搜索/缓存限制保持。本轮无 React renderer、真实 profile GUI 或 Windows 原生复验，新增链路证据限安装版 rc.5，不扩大已验证版本边界。
+
+## Windows GUI 真机验收 — 已记录（2026-11-25）
+
+维护者在**原生 Windows** 的 DSH 桌面 GUI 上验证了删除流程：安装插件、侧栏入口、收进回收站、恢复、彻底删除、清空回收站均可用。
+
+**边界**：这是 GUI 功能验收，不是测试套件验收——`npm test` 里 6 项 Windows 专属原生场景（大小写折叠信号量互斥、junction 会话路径拒绝、共享冲突重试、重试时的归档门禁、暂存恢复的原路径信号量、deny-delete 句柄在有界重试后放行）仍只在 macOS 上"明确跳过"，未在 Windows 上执行；rc.2 桌面 GUI 亦未验证。兼容性表、README、DETAIL 均按此界线表述，不扩大声明。

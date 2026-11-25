@@ -75,16 +75,16 @@ Agent 可使用 **`plugin_manager` → `install_bundle`**，将 `target` 设为�
 | Cordis | peer `^4.1.0` |
 | 原生文件系统支持 | POSIX：`@deepseek-ai/node-addon-system` peer `^0.1.2`；Windows：运行依赖 `koffi` 3.1.1 |
 | Node.js | `^22.19.0 || >=24.0.0` |
-| Host 平台 | macOS 隔离回归通过；已实现 Windows，原生 Windows 验收待用户代跑 |
+| Host 平台 | macOS：完整隔离回归。Windows：维护者已于 2026-11-25 在 DSH 桌面 GUI 真机验证（安装、侧栏入口、收进回收站、恢复、彻底删除、清空）。Windows 专属的原生回归用例尚未运行。 |
 | 会话 backend | 物理删除仅支持 JSONL；POSIX 要求既有锁文件，Windows 无锁文件要求；路径、身份不可靠或原生互斥不可用时明确拒绝 |
 
-本轮未做 rc.2 Desktop GUI 或 Windows 真机验收。[Windows 自检命令](./docs/DETAIL.md#windows-self-check) 只使用合成临时 home。
+Windows GUI 删除流程已由维护者于 2026-11-25 真机验证；Windows 专属的原生回归用例与 rc.2 桌面 GUI 未运行。[Windows 自检命令](./docs/DETAIL.md#windows-self-check) 只使用合成临时 home。
 
 peer 区间允许兼容更新，不代表后续 DSH 版本已验收。升级后应复核 Client 工作区投影和原生锁。
 
 ## 已知限制
 
-- Client 移除通知为 best effort，断线后不重放；`removed/ok` 仅代表本地 emit 返回，不是客户端回执，较早的 Host 监听器抛错也可能阻断下发。重连由官方 catalog 全量读取修复；原生后续 re-add、subagent lineage 保留和搜索同步仍由 DSH 负责。新增 transport/catalog 隔离探针使用安装版 rc.5 合成数据，不代表 GUI 或 Windows 真机验收。
+- Client 移除通知为 best effort，断线后不重放；`removed/ok` 仅代表本地 emit 返回，不是客户端回执，较早的 Host 监听器抛错也可能阻断下发。重连由官方 catalog 全量读取修复；原生后续 re-add、subagent lineage 保留和搜索同步仍由 DSH 负责。新增 transport/catalog 隔离探针使用安装版 rc.5 合成数据，探针本身不等于 GUI 或 Windows 真机验收。
 - 已加载/已 enter 的会话可能长期由 DSH 持有写租约。删除/清空遇到 lock-busy 会先排队，保留日志、归档和工作区归属；重启 DSH 后 Host 自动重试，若仍 busy 则保留到下次启动，也可手动再次彻底删除。启动扫描在后台执行，服务未就绪时退避重试，其它错误按阶段报告。官方无公开卸载/close API；插件不释放其它所有者的句柄，不绕过租约、不 unlink 活锁文件、不夺锁。
 - 保留附件、工作区文件、Git worktree、产物、服务端日志、备份及其它插件快照。
 - 不承诺安全擦除；搜索结果依赖 DSH 既有同步收敛，不保证立即消失；投影缓存清理失败只记 warning。

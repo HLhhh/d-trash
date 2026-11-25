@@ -13,7 +13,7 @@ DSH 插件 bundle：给会话加「收进回收站」动作，把历史对话收
 - **Host**：`src/index.ts`，面向对象——`export default class TrashService`（service class），领域对象用 `interface`/`enum` 建模。
 - **Client**：`src/client.ts`，**React 函数组件 + hooks**（DSH 惯例），经 `window.__ModuleLoader__.load` 惰性工厂注册 slot。
 - DSH 服务经 `inject` / `ctx.get` 声明；不 `require` DSH 内部 Client 包，不写 DOM 到 `document.body`，样式用 `--dsw-alias-*` theme token，文案走 `locale`。
-- UI 文案以 `locale/en.json`、`locale/zh.json` 为唯一源，`src/client-copy.ts` 只复用字典/推导类型；不要另写一份文案。当前隔离 API/build/test 兼容边界为 DSH `0.2.2-rc.2` / `0.2.2-rc.5`，安装版 discovery 为 rc.5；Windows 原生代跑尚待用户完成。
+- UI 文案以 `locale/en.json`、`locale/zh.json` 为唯一源，`src/client-copy.ts` 只复用字典/推导类型；不要另写一份文案。当前隔离 API/build/test 兼容边界为 DSH `0.2.2-rc.2` / `0.2.2-rc.5`，安装版 discovery 为 rc.5；Windows GUI 删除流程已由维护者真机验证（2026-11-25），Windows 专属原生回归用例尚未在 Windows 上运行。
 - 涉及 DSH 的 API 事实，先 runtime inspect（`cordis_inspect_query`）或读 `dsh-doc` 技能，不凭记忆。
 
 ## 领域不变量（改代码前必读）

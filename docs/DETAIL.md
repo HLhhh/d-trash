@@ -306,7 +306,7 @@ canonical path、租约、归档门禁和 target 不存在；不覆盖冲突目�
 
 测试通过数和 SKIP 分开输出。Windows 跳过原 POSIX symlink/O_NOFOLLOW、缺锁拒绝、SIGKILL 场景和 mode 位断言，
 另跑无锁文件、命名信号量竞争/大小写、终止进程释放、junction 拒绝、rename/rm 重试及审计用例。
-macOS 跳过明确要求 Windows 的 6 项，不把注入错误的策略单元测试当作 Windows 原生验收。
+macOS 跳过明确要求 Windows 的 6 项，不把注入错误的策略单元测试当作 Windows 原生验收。维护者已于 2026-11-25 在原生 Windows 的 DSH 桌面 GUI 验证通过删除全流程（安装、侧栏入口、收进、恢复、彻底删除、清空）；这 6 项原生用例仍留待 Windows 上执行。
 
 <a id="windows-self-check"></a>
 ## Windows self-check
