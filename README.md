@@ -1,6 +1,6 @@
 # d-trash
 
-[简体中文](./README_zh.md) · [Technical details](./docs/DETAIL.md) · [Changelog](./CHANGELOG.md)
+[简体中文](./README_zh.md) · [Technical details](./docs/DETAIL.md) · [Changelog](./CHANGELOG.md) · [Releases](https://github.com/HLhhh/d-trash/releases)
 
 GitHub primary repository · [Gitee mirror](https://gitee.com/huang-lin-java/d-trash)
 

@@ -1,6 +1,6 @@
 # d-trash
 
-[English](./README.md) · [技术细节](./docs/DETAIL.md) · [变更记录](./CHANGELOG.md)
+[English](./README.md) · [技术细节](./docs/DETAIL.md) · [变更记录](./CHANGELOG.md) · [版本发布](https://github.com/HLhhh/d-trash/releases)
 
 GitHub 主仓 · [Gitee 镜像](https://gitee.com/huang-lin-java/d-trash)
 
