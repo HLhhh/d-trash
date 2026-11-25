@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-25
+
+Windows support, deferred deletion for sessions DSH keeps loaded, audit-log
+rotation, a Client cleanup notification so deleted conversations stop
+reappearing under Ungrouped, and DSH 0.2.2-rc.2 compatibility.
+
 ### Fixed
 
 - Successful physical deletion and ghost cleanup now best-effort emit the public `api-session/removed(sessionId)` event after marker removal, clearing stale Client catalog rows that could reappear under Ungrouped. Failed/deferred deletion and staging-only recovery never notify; listener exceptions record `removed/warning` without changing successful results or Empty Trash counts. Added 14 synthetic-home boundary regressions and installed rc.5 Host Gateway → Client event pump/catalog → Workspace tree reproductions (row present before delivery, absent afterward; failure/queue retain it). Notifications remain non-replayed best effort; no core/profile changes or real-session acceptance.
@@ -43,4 +49,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced the local placeholder package identity with `d-trash`; Client registration and test fixtures derive the package identity from the manifest or generated contribution.
 - Declared caret peer ranges while keeping development dependency versions pinned; DSH 0.2.2-rc.5 remains the verified boundary.
 
-The 0.1.0 entry records delivered functionality and repository preparation; npm publication and a public release are separate steps.
+The 0.1.0 entry records delivered functionality and repository preparation. 0.2.0 is the first tagged public release; npm publication is a separate step.
